@@ -15,7 +15,8 @@
 		"test": "bun test",
 		"check:types": "wrangler types --check",
 		"build": "wrangler deploy --dry-run --outdir dist",
-		"eval:semantic": "bun eval/run-semantic.ts"
+		"eval:semantic": "bun eval/run-semantic.ts",
+		"eval:routing": "bun eval/run-routing.ts"
 	},
 	"dependencies": {
 		"hono": "^4.13.8"

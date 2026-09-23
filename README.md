@@ -109,6 +109,19 @@ bun run eval:semantic --sweep    # required threshold を変えて比較
 - 指標: capability ごとの precision / recall / FPR / FNR / uncertain rate
 - Jev の結果は `eval/.cache/` に保存され、state や質問文が変わった case だけ再取得します
 
+end-to-end routing eval (structural 維持、model/models filtering、tool merge / tool_choice、degraded):
+
+```sh
+bun run eval:routing                                   # 固定 probability で評価 (API 呼び出しなし、CI でも実行)
+bun run eval:routing --threshold social.x.search=0.95  # threshold を変えて比較
+bun run eval:routing --live                            # semantic 判定に実 Jev を使う (要 OPENROUTER_API_KEY)
+```
+
+- dataset: `eval/routing-dataset.ts`
+- forwarded request を resolver とは独立に registry / model catalog で検査し、Hard Requirement violation・incompatible fallback leakage・unnecessary model override rate・caller tool preservation failures を集計 (violation / leakage / tool 保持失敗が1件でもあれば exit 1)
+
+threshold は暫定の `required: p >= 0.8` / `not_required: p <= 0.2` を維持しています。現在の dataset では X Search の required threshold 0.5〜0.8 で precision / recall とも 1.00、0.9 では recall が 0.63 に低下するため、false negative を避ける観点から 0.8 を上限としています。
+
 ## CI/CD
 
 `.github/workflows/ci.yml`

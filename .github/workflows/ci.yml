@@ -26,6 +26,7 @@ jobs:
       - run: bun run check:types
       - run: bun run typecheck
       - run: bun run test
+      - run: bun run eval:routing
       - run: bun run build
 
   deploy:
