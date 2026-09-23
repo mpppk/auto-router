@@ -6,6 +6,4 @@
 	"observability": {
 		"enabled": true
 	}
-	// Secrets (set via `wrangler secret put <NAME>`, not committed):
-	// - JEV_API_KEY
 }
