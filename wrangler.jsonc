@@ -30,8 +30,15 @@
 			"simple": { "limit": 120, "period": 60 }
 		}
 	],
+	"kv_namespaces": [
+		{
+			// cron で縮約した OpenRouter model catalog (#20)
+			"binding": "CATALOG_KV",
+			"id": "5078fa1b4e3b45719637376fe4c846f8"
+		}
+	],
 	"triggers": {
-		// 期限切れ routing trace の削除
-		"crons": ["17 3 * * *"]
+		// 期限切れ routing trace の削除 / model catalog の更新 (src/index.ts と合わせる)
+		"crons": ["17 3 * * *", "7 * * * *"]
 	}
 }

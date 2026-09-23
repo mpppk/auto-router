@@ -119,6 +119,14 @@ auto-router 側の負担 (Worker の CPU / request、Jev 呼び出し、D1 書�
 - Jev が 401 (API key 拒否) を返した場合は degraded として続行せず、upstream も呼ばずに `401 invalid_api_key` を返します (trace は保存しない)。403 等の他のエラーは key の model 制限等でも起こるため、従来どおり degraded として扱います
 - upstream が 401 を返した場合は response をそのまま返しますが、trace は保存しません (`Auto-Router-Trace-Id` も付与しない)
 
+### Model catalog
+
+structural requirement の判定には OpenRouter `GET /models` の `input_modalities` / `supported_parameters` / `context_length` を使います。`/models` の response は約 750KB あり request path で parse すると CPU 時間を消費するため、cron trigger (`7 * * * *`、毎時) で必要な field だけに縮約した catalog (約 35KB) を KV (`CATALOG_KV`) に保存し、各 isolate はそれを読みます (isolate 内 cache 5 分)。
+
+- KV が空 (初回 deploy 直後等) の場合だけ request 中に OpenRouter から取得して KV を埋める
+- cron の取得に失敗した場合は KV の既存の値を使い続ける。KV の読み込みにも失敗した場合は古い isolate cache → 空 catalog (全 model 不明) に fallback し、request は失敗させない
+- ローカル (`wrangler dev --test-scheduled`) では `curl "localhost:8787/__scheduled?cron=7+*+*+*+*"` で更新できる
+
 ### Routing trace
 
 - Cloudflare D1 (`TRACES_DB`, `migrations/`) に 7 日間保存し、cron trigger で期限切れを削除

@@ -1,11 +1,12 @@
-import { type Bindings, createApp, createTraceStore } from "./app";
+import { type Bindings, createApp } from "./app";
+import { runScheduled } from "./scheduled";
 
 const app = createApp();
 
+// entry module の named export は workerd の entrypoint として扱われるため、default export のみにする。
 export default {
 	fetch: app.fetch,
-	/** 期限切れ routing trace を削除する (wrangler.jsonc の cron trigger)。 */
-	async scheduled(_controller, env) {
-		await createTraceStore(env)?.deleteExpired(Date.now());
+	async scheduled(controller, env) {
+		await runScheduled(controller.cron, env);
 	},
 } satisfies ExportedHandler<Bindings>;

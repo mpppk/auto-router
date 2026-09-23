@@ -61,35 +61,48 @@ export const parseOpenRouterModels = (json: unknown): ModelProfile[] => {
 	});
 };
 
-export interface OpenRouterModelCatalogOptions {
+export interface OpenRouterModelsOptions {
 	baseUrl: string;
 	fetch: FetchLike;
-	ttlMs?: number;
 	timeoutMs?: number;
+}
+
+/**
+ * OpenRouter `GET /models` (認証不要、約 750KB) を取得して profile に変換する。
+ * parse の CPU 負荷が大きいため、通常の request path ではなく cron (KV 更新) で使う。
+ */
+export const fetchOpenRouterProfiles = async (
+	options: OpenRouterModelsOptions,
+): Promise<ModelProfile[]> => {
+	const res = await options.fetch(`${options.baseUrl}/models`, {
+		signal: AbortSignal.timeout(options.timeoutMs ?? 3000),
+	});
+	if (!res.ok) throw new Error(`status ${res.status}`);
+	return parseOpenRouterModels(await res.json());
+};
+
+export interface OpenRouterModelCatalogOptions extends OpenRouterModelsOptions {
+	ttlMs?: number;
 	now?: () => number;
 }
 
 /**
- * OpenRouter `GET /models` (認証不要) から model profile を取得し、isolate 内でcacheする。
+ * OpenRouter `GET /models` から model profile を取得し、isolate 内でcacheする。
+ * KV binding が無い環境 (ローカル / テスト) 用。本番は `createKvModelCatalogSource` を使う。
  * 取得に失敗した場合は空の catalog (全 model 不明) を返し、request 自体は失敗させない。
  */
 export const createOpenRouterModelCatalogSource = (
 	options: OpenRouterModelCatalogOptions,
 ): ModelCatalogSource => {
 	const ttlMs = options.ttlMs ?? 60 * 60 * 1000;
-	const timeoutMs = options.timeoutMs ?? 3000;
 	const now = options.now ?? Date.now;
 	let cached: { catalog: ModelCatalog; expiresAt: number } | undefined;
 	let inflight: Promise<ModelCatalog> | undefined;
 
 	const fetchCatalog = async (): Promise<ModelCatalog> => {
 		try {
-			const res = await options.fetch(`${options.baseUrl}/models`, {
-				signal: AbortSignal.timeout(timeoutMs),
-			});
-			if (!res.ok) throw new Error(`status ${res.status}`);
 			const catalog = createStaticModelCatalog(
-				parseOpenRouterModels(await res.json()),
+				await fetchOpenRouterProfiles(options),
 			);
 			cached = { catalog, expiresAt: now() + ttlMs };
 			return catalog;
