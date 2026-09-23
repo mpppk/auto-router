@@ -47,6 +47,43 @@ describe("chatCompletionsAdapter.extractRoutingContext", () => {
 	});
 });
 
+describe("agentLoopTurns", () => {
+	const context = (messages: unknown[]) =>
+		adapter.extractRoutingContext(adapter.parseRequest({ messages }))
+			.agentLoopTurns;
+	const toolCall = {
+		role: "assistant",
+		content: null,
+		tool_calls: [{ id: "call_1", type: "function" }],
+	};
+	const toolResult = { role: "tool", tool_call_id: "call_1", content: "ok" };
+
+	test("0 for a new user turn", () => {
+		expect(context([{ role: "user", content: "hi" }])).toBe(0);
+		expect(
+			context([
+				{ role: "user", content: "a" },
+				toolCall,
+				toolResult,
+				{ role: "assistant", content: "done" },
+				{ role: "user", content: "b" },
+			]),
+		).toBe(0);
+	});
+
+	test("counts assistant tool calls after the latest user message", () => {
+		expect(
+			context([
+				{ role: "user", content: "a" },
+				toolCall,
+				toolResult,
+				toolCall,
+				toolResult,
+			]),
+		).toBe(2);
+	});
+});
+
 describe("chatCompletionsAdapter.applyRoutePlan", () => {
 	const request = adapter.parseRequest({
 		model: "a",

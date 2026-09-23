@@ -21,6 +21,8 @@ export interface RoutingDecision {
 	semantic: SemanticDetection;
 	structural: StructuralAnalysis;
 	features: RequestFeatures;
+	/** 最新 user message 以降の assistant tool call 数 (agent loop のターン)。 */
+	agentLoopTurns: number;
 	/** caller が `Auto-Router-Capabilities` で限定した semantic capability。 */
 	semanticScope?: Capability[];
 	latencyMs: { jev?: number; routing: number };
@@ -78,6 +80,7 @@ export const decideRoute = async (
 		semantic,
 		structural,
 		features: input.context.features,
+		agentLoopTurns: input.context.agentLoopTurns,
 		...(options.enabled && options.capabilities
 			? { semanticScope: options.capabilities }
 			: {}),

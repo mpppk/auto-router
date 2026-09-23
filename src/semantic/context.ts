@@ -27,15 +27,23 @@ export interface SemanticContext {
 /**
  * routing context から semantic detection 用の context を作る。
  * tool result 等は adapter の時点で除外済み。巨大な message は中間を省略する。
+ *
+ * 最新の user message より後の assistant message (agent loop 途中の経過) は含めない。
+ * 同じ user message に対する agent loop の各ターンで判定が変わらず、
+ * 会話途中で model が行き来しないようにするため (#21)。
  */
 export const buildSemanticContext = (
 	context: Pick<RoutingContext, "conversation" | "instructions">,
 	limit = ROUTING_CONTEXT_MESSAGES,
 ): SemanticContext => {
-	const conversation = context.conversation.slice(-limit).map((m) => ({
-		role: m.role,
-		text: truncateMiddle(m.text, MAX_MESSAGE_CHARS),
-	}));
+	const lastUser = context.conversation.findLastIndex((m) => m.role === "user");
+	const conversation = context.conversation
+		.slice(0, lastUser + 1)
+		.slice(-limit)
+		.map((m) => ({
+			role: m.role,
+			text: truncateMiddle(m.text, MAX_MESSAGE_CHARS),
+		}));
 
 	const instructions: string[] = [];
 	let remaining = MAX_INSTRUCTION_CHARS;

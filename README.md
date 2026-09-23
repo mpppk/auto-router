@@ -119,6 +119,20 @@ auto-router 側の負担 (Worker の CPU / request、Jev 呼び出し、D1 書�
 - Jev が 401 (API key 拒否) を返した場合は degraded として続行せず、upstream も呼ばずに `401 invalid_api_key` を返します (trace は保存しない)。403 等の他のエラーは key の model 制限等でも起こるため、従来どおり degraded として扱います
 - upstream が 401 を返した場合は response をそのまま返しますが、trace は保存しません (`Auto-Router-Trace-Id` も付与しない)
 
+### Agent loop (tool calling の途中での model override)
+
+semantic 判定は「最新の user message に答えるために何が必要か」で行い、Jev に渡す context は最新の user message までに限定します (それ以降の agent loop の経過 = assistant message / tool result は含めない)。そのため同じ user message に対する agent loop の各ターンで判定が変わらず、loop の途中で model が行き来しません。次の user message が来た時点で改めて判定し、X Search が不要になれば caller の model に戻ります。
+
+model が切り替わっても caller の会話履歴 (assistant の `reasoning_details`、provider 固有の tool call id 等) は改変せずに転送します。OpenRouter 上で以下の組み合わせが upstream エラーにならないことを確認しています (2026-09、#21)。
+
+| 元の model (履歴に含まれる field) | 切り替え先 |
+| --- | --- |
+| `anthropic/claude-sonnet-5` (thinking の `reasoning.text` + signature、`toolu_...` id) | `x-ai/grok-4.7` + X Search |
+| `openai/gpt-5.4-mini` (`reasoning.encrypted` `openai-responses-v1`、`call_...` id) | `x-ai/grok-4.7` + X Search / `anthropic/claude-sonnet-5` (thinking) |
+| `x-ai/grok-4.7` (`reasoning.encrypted` `xai-responses-v1`、`call-...` id) | `anthropic/claude-sonnet-5` (thinking) |
+
+trace の `context.agentLoopTurns` は最新の user message 以降の assistant tool call 数です (0 なら新しい user turn)。
+
 ### Model catalog
 
 structural requirement の判定には OpenRouter `GET /models` の `input_modalities` / `supported_parameters` / `context_length` を使います。`/models` の response は約 750KB あり request path で parse すると CPU 時間を消費するため、cron trigger (`7 * * * *`、毎時) で必要な field だけに縮約した catalog (約 35KB) を KV (`CATALOG_KV`) に保存し、各 isolate はそれを読みます (isolate 内 cache 5 分)。

@@ -38,6 +38,11 @@ export interface RoutingContext {
 	conversation: ConversationMessage[];
 	/** system / developer 相当の指示 (古い順)。conversation とは別枠で扱う。 */
 	instructions: string[];
+	/**
+	 * 最新の user message より後にある assistant の tool call 数。
+	 * 0 なら新しい user turn、1 以上なら同じ user message に対する agent loop の途中。
+	 */
+	agentLoopTurns: number;
 	features: RequestFeatures;
 }
 
