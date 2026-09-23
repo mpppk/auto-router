@@ -56,3 +56,9 @@ jobs:
           command: |
             d1 migrations apply TRACES_DB --remote
             deploy --minify
+      # workerd 上の runtime 依存の挙動 (Jev / KV / D1 / waitUntil 等) を本番 endpoint で確認する (#28)
+      - name: Smoke test
+        run: bun run smoke
+        env:
+          SMOKE_BASE_URL: ${{ steps.deploy.outputs.deployment-url || vars.SMOKE_BASE_URL }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
