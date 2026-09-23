@@ -28,6 +28,7 @@ import { CAPABILITY_QUESTIONS } from "../src/semantic/questions";
 import { DEFAULT_OPENROUTER_BASE_URL } from "../src/upstream/openrouter";
 import { computeMetrics, formatRate, type Observation } from "./metrics";
 import { SEMANTIC_GOLD_DATASET } from "./semantic-dataset";
+import { parseThresholds } from "./thresholds";
 
 const CACHE_PATH = "eval/.cache/semantic-probabilities.json";
 
@@ -40,28 +41,6 @@ const { values } = parseArgs({
 		concurrency: { type: "string", default: "4" },
 	},
 });
-
-const parseThresholds = (specs: string[]): ThresholdConfig => {
-	const config: ThresholdConfig = {};
-	for (const spec of specs) {
-		const [capability, range] = spec.split("=");
-		const [required, notRequired] = (range ?? "").split(",").map(Number);
-		if (
-			!SEMANTIC_CAPABILITIES.includes(capability as Capability) ||
-			required === undefined ||
-			Number.isNaN(required)
-		) {
-			throw new Error(
-				`invalid --threshold ${spec} (capability=required[,notRequired])`,
-			);
-		}
-		config[capability as Capability] = {
-			required,
-			notRequired: notRequired ?? DEFAULT_THRESHOLD.notRequired,
-		};
-	}
-	return config;
-};
 
 type Cache = Record<
 	string,
