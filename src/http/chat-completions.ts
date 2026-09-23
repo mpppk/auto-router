@@ -2,6 +2,14 @@ import { chatCompletionsAdapter } from "../adapters/chat-completions";
 import { RouterError } from "../core/errors";
 import type { EffectiveRoutePlan } from "../core/types";
 import { decideRoute, type RoutingDeps } from "../routing/decide";
+import { apiKeyFingerprint } from "../trace/fingerprint";
+import { summaryHeaders } from "../trace/headers";
+import type { TraceStore } from "../trace/store";
+import {
+	buildRoutingTrace,
+	newTraceId,
+	type RoutingTrace,
+} from "../trace/trace";
 import {
 	forwardToOpenRouter,
 	getBearerToken,
@@ -10,8 +18,17 @@ import {
 } from "../upstream/openrouter";
 import { parseRouterOptions } from "./router-options";
 
+/** request ごとに決まる trace 永続化の依存。 */
+export interface TraceDeps {
+	store: TraceStore;
+	fingerprintSecret?: string;
+	/** response 返却後に trace を書き込むための waitUntil。無ければ await する。 */
+	waitUntil?: (promise: Promise<unknown>) => void;
+}
+
 export interface ChatCompletionsDeps extends RoutingDeps {
 	upstream: UpstreamConfig;
+	trace: TraceDeps;
 }
 
 const readJson = async (
@@ -36,15 +53,20 @@ const isUnchanged = (plan: EffectiveRoutePlan, requested: readonly string[]) =>
 	plan.modelChain.length === requested.length &&
 	plan.modelChain.every((m, i) => m === requested[i]);
 
-/** Chat Completions 互換 request を parse し、routing 判断に必要な情報を揃える。 */
-export const prepareChatCompletions = async (request: Request) => {
-	const apiKey = getBearerToken(request.headers);
+export const requireApiKey = (headers: Headers): string => {
+	const apiKey = getBearerToken(headers);
 	if (apiKey === undefined) {
 		throw new RouterError(
 			"missing_authorization",
 			"`Authorization: Bearer <OpenRouter API key>` header is required.",
 		);
 	}
+	return apiKey;
+};
+
+/** Chat Completions 互換 request を parse し、routing 判断に必要な情報を揃える。 */
+export const prepareChatCompletions = async (request: Request) => {
+	const apiKey = requireApiKey(request.headers);
 	const options = parseRouterOptions(request.headers);
 	const adapter = chatCompletionsAdapter;
 	const { raw, json } = await readJson(request);
@@ -58,6 +80,23 @@ export const prepareChatCompletions = async (request: Request) => {
 		context: adapter.extractRoutingContext(parsed),
 		requestedChain: adapter.getRequestedModelChain(parsed),
 	};
+};
+
+const persistTrace = (deps: TraceDeps, trace: RoutingTrace, apiKey: string) => {
+	const write = apiKeyFingerprint(apiKey, deps.fingerprintSecret)
+		.then((owner) => deps.store.put(trace, owner))
+		.catch((err: unknown) => {
+			// trace の保存失敗で request を失敗させない。
+			console.warn(
+				"failed to persist routing trace",
+				err instanceof Error ? err.message : err,
+			);
+		});
+	if (deps.waitUntil) {
+		deps.waitUntil(write);
+		return Promise.resolve();
+	}
+	return write;
 };
 
 /**
@@ -81,12 +120,19 @@ export const handleChatCompletions = async (
 		},
 		deps,
 	);
+	const trace = buildRoutingTrace({
+		id: newTraceId(),
+		decision,
+		detail: prepared.options.debug ? "full" : "summary",
+	});
+
 	const { resolution } = decision;
 	if (resolution.error !== undefined || resolution.plan === undefined) {
-		throw (
+		await persistTrace(deps.trace, trace, prepared.apiKey);
+		const error =
 			resolution.error ??
-			new RouterError("capability_not_supported", "No route available.")
-		);
+			new RouterError("capability_not_supported", "No route available.");
+		return error.toResponse(summaryHeaders(trace));
 	}
 
 	// 変更が無い場合は caller の raw body をそのまま転送し、再serializeによる差分も生じさせない。
@@ -94,6 +140,7 @@ export const handleChatCompletions = async (
 		? prepared.raw
 		: JSON.stringify(adapter.applyRoutePlan(parsed, resolution.plan));
 
+	const started = Date.now();
 	const upstream = await forwardToOpenRouter(
 		deps.upstream,
 		"/chat/completions",
@@ -101,5 +148,8 @@ export const handleChatCompletions = async (
 		request.headers,
 		request.signal,
 	);
-	return toClientResponse(upstream);
+	trace.latencyMs.upstream = Date.now() - started;
+	await persistTrace(deps.trace, trace, prepared.apiKey);
+
+	return toClientResponse(upstream, summaryHeaders(trace));
 };
