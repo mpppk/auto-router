@@ -64,6 +64,22 @@ OpenAI / OpenRouter 互換の base URL として `https://<host>/api/v1` を指�
 | --- | --- | --- |
 | `Auto-Router-Allow-Model-Override` | `true` | caller の model chain で Hard Requirement を満たせない場合に capability default route へ置換してよいか。`false` なら `capability_not_supported` |
 | `Auto-Router-Debug` | `false` | `true` で詳細 trace (candidate ごとの conflict 詳細、tool_choice、provider 等) を保存 |
+| `Auto-Router-Semantic` | `on` | `off` で semantic routing を無効化。Jev を呼ばず semantic requirement なしとして扱う (structural requirement と Hard Requirement 保持はそのまま) |
+| `Auto-Router-Capabilities` | (全 capability) | semantic routing で判定する capability を `,` 区切りで限定 (例: `web.search,social.x.search`)。指定外の capability は Jev に問い合わせず、required にならない |
+
+`Auto-Router-*` header は upstream には転送しません。値は前後の空白を無視し、真偽値は `true` / `false`、on / off は `on` / `off`、一覧は `,` 区切りで指定します。不正な値 (未知の capability、空要素等) は `invalid_router_request` (400) になります。
+
+### 課金への影響
+
+auto-router は BYOK のため、以下の料金は caller 自身の OpenRouter API key に課金されます。
+
+| 操作 | いつ発生するか | 料金の目安 | 抑止する方法 |
+| --- | --- | --- | --- |
+| Jev (`~typesafe/jev-latest`) による semantic 判定 | user message を含む全 request (routing 前) | 約 $0.00002 / request | `Auto-Router-Semantic: off` |
+| `openrouter:web_search` tool の注入 | `web.search` が required と判定されたとき | OpenRouter の web search 料金 (engine / 結果件数に依存) | `Auto-Router-Capabilities` から `web.search` を外す / `Auto-Router-Semantic: off` |
+| Grok + X Search (`x_search`) への切り替え | `social.x.search` が required と判定されたとき | Grok の token 料金 + X Search の従量課金 ($5 / 1,000 posts、2026-09-21〜) | `Auto-Router-Capabilities` から `social.x.search` を外す / `Auto-Router-Allow-Model-Override: false` / `Auto-Router-Semantic: off` |
+
+routing trace (`GET /api/v1/auto-router/traces/:traceId` / inspect) の `billing` に、その request で Jev を呼んだか (`jev`) と router が有効化した課金対象の server tool (`serverTools`: `web_search` / `x_search`) を記録します。caller が元から指定していた server tool は含めません。
 
 ### Response headers
 

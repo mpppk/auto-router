@@ -48,6 +48,8 @@ export type SemanticDetection =
 	| (DetectionBase & { status: "ok" })
 	/** 最新 user message が無いため判定しなかった。 */
 	| (DetectionBase & { status: "skipped" })
+	/** caller が header で semantic routing を無効化した (Jev を呼ばない)。 */
+	| (DetectionBase & { status: "disabled" })
 	/**
 	 * Jev 障害。semantic requirement は空として扱い (model chain / tool 注入を変えない)、
 	 * request 自体は fail させない。structural requirement には影響しない。
@@ -61,10 +63,17 @@ export interface SemanticDetectorOptions {
 	now?: () => number;
 }
 
+export interface DetectOptions {
+	apiKey: string;
+	signal?: AbortSignal;
+	/** この request で判定する capability を限定する (detector の capability との積集合)。 */
+	capabilities?: readonly Capability[];
+}
+
 export interface SemanticDetector {
 	detect(
 		context: Pick<RoutingContext, "conversation" | "instructions">,
-		options: { apiKey: string; signal?: AbortSignal },
+		options: DetectOptions,
 	): Promise<SemanticDetection>;
 }
 
@@ -90,17 +99,24 @@ export const createSemanticDetector = (
 ): SemanticDetector => {
 	const capabilities = options.capabilities ?? SEMANTIC_CAPABILITIES;
 	const now = options.now ?? Date.now;
-	const questions = Object.fromEntries(
-		capabilities.map((c) => [c, CAPABILITY_QUESTIONS[c]]),
-	);
 
 	return {
-		async detect(context, { apiKey, signal }) {
+		async detect(context, { apiKey, signal, capabilities: scope }) {
 			const semantic: SemanticContext = buildSemanticContext(context);
 			const messagesUsed = semantic.conversation.length;
 			if (semantic.latestUserMessage === undefined) {
 				return { status: "skipped", requirements: [], messagesUsed };
 			}
+			const targets =
+				scope === undefined
+					? capabilities
+					: capabilities.filter((c) => scope.includes(c));
+			if (targets.length === 0) {
+				return { status: "disabled", requirements: [], messagesUsed: 0 };
+			}
+			const questions = Object.fromEntries(
+				targets.map((c) => [c, CAPABILITY_QUESTIONS[c]]),
+			);
 
 			const started = now();
 			try {

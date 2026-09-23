@@ -1,6 +1,7 @@
 import type { SemanticDecision } from "../core/capabilities";
 import type { RouteConflictCode } from "../core/planner";
 import type { ProviderPreferences } from "../core/provider";
+import { WEB_SEARCH_TOOL_TYPE } from "../core/registry";
 import type { RouteReason } from "../core/resolver";
 import type { RoutingDecision } from "../routing/decide";
 import type { JevFailureReason } from "../semantic/jev-client";
@@ -27,7 +28,9 @@ export interface RoutingTrace {
 		conversationMessagesUsed: number;
 	};
 
-	semanticStatus: "ok" | "skipped" | "degraded";
+	semanticStatus: "ok" | "skipped" | "degraded" | "disabled";
+	/** `Auto-Router-Capabilities` で判定対象を限定した場合のみ。 */
+	semanticScope?: string[];
 	semanticRequirements: Array<{
 		capability: string;
 		requiredProbability: number;
@@ -74,6 +77,14 @@ export interface RoutingTrace {
 		effective?: ProviderPreferences;
 	};
 
+	/** routing によって caller の OpenRouter 課金が発生・増加しうる操作。 */
+	billing: {
+		/** caller の key で Jev (semantic detector) を呼んだか。 */
+		jev: boolean;
+		/** router が注入・補完して有効にした課金対象の server tool 機能。 */
+		serverTools: BillableServerTool[];
+	};
+
 	reason: RouteReason;
 	error?: { code: string; message: string };
 
@@ -90,6 +101,39 @@ export interface RoutingTrace {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** `web_search`: openrouter:web_search の検索料金、`x_search`: xAI X Search の従量課金。 */
+export type BillableServerTool = "web_search" | "x_search";
+
+const hasXSearch = (tool: unknown) =>
+	isRecord(tool) &&
+	isRecord(tool.parameters) &&
+	isRecord(tool.parameters.x_search);
+
+/**
+ * router が有効にした課金対象の server tool 機能。
+ * caller が元から指定していた機能は caller の選択なので含めない。
+ */
+export const billableServerTools = (input: {
+	callerTools: readonly unknown[];
+	injectedTools: readonly unknown[];
+	completedTools: readonly unknown[];
+}): BillableServerTool[] => {
+	const result = new Set<BillableServerTool>();
+	const isWebSearch = (tool: unknown) =>
+		isRecord(tool) && tool.type === WEB_SEARCH_TOOL_TYPE;
+	for (const tool of input.injectedTools.filter(isWebSearch)) {
+		result.add("web_search");
+		if (hasXSearch(tool)) result.add("x_search");
+	}
+	const callerXSearch = input.callerTools.some(
+		(t) => isWebSearch(t) && hasXSearch(t),
+	);
+	for (const tool of input.completedTools.filter(isWebSearch)) {
+		if (hasXSearch(tool) && !callerXSearch) result.add("x_search");
+	}
+	return [...result];
+};
 
 export const summarizeTool = (tool: unknown): ToolSummary => {
 	if (!isRecord(tool)) return { type: "unknown" };
@@ -126,6 +170,9 @@ export const buildRoutingTrace = (input: {
 		effectiveModelChain: resolution.effectiveChain,
 		context: { conversationMessagesUsed: semantic.messagesUsed },
 		semanticStatus: semantic.status,
+		...(decision.semanticScope
+			? { semanticScope: decision.semanticScope }
+			: {}),
 		semanticRequirements: semantic.requirements.map((r) => ({
 			capability: r.capability,
 			requiredProbability: r.requiredProbability,
@@ -166,6 +213,18 @@ export const buildRoutingTrace = (input: {
 				: full && features.provider !== undefined
 					? { effective: features.provider }
 					: {}),
+		},
+		billing: {
+			jev: semantic.status === "ok" || semantic.status === "degraded",
+			// error で upstream に送らない場合は server tool も実行されない。
+			serverTools:
+				resolution.plan === undefined
+					? []
+					: billableServerTools({
+							callerTools: features.tools ?? [],
+							injectedTools: patch?.injectedTools ?? [],
+							completedTools: patch?.completedTools ?? [],
+						}),
 		},
 		reason: resolution.reason,
 		...(resolution.error

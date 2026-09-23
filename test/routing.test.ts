@@ -203,3 +203,75 @@ describe("capability-aware routing through the proxy", () => {
 		expect(forwarded?.models).toBeUndefined();
 	});
 });
+
+describe("semantic routing control headers", () => {
+	const webSearch = { "web.search": 0.95 };
+
+	test("Auto-Router-Semantic: off skips Jev and keeps the request unchanged", async () => {
+		const { res, forwarded, detector } = await send(
+			{ model: "anthropic/claude-sonnet-5", messages },
+			{
+				semantic: { "social.x.search": 0.95, ...webSearch },
+				headers: { "Auto-Router-Semantic": "off" },
+			},
+		);
+		expect(res.status).toBe(200);
+		expect(detector.calls).toBe(0);
+		expect(forwarded).toEqual({ model: "anthropic/claude-sonnet-5", messages });
+		expect(res.headers.get("Auto-Router-Route-Reason")).toBe("requested_model");
+		expect(res.headers.get("Auto-Router-Degraded")).toBe("false");
+	});
+
+	test("disabling semantic routing keeps structural requirements", async () => {
+		const { forwarded, detector } = await send(
+			{
+				model: "anthropic/claude-sonnet-5",
+				models: ["text/no-tools"],
+				messages,
+				tools: [{ type: "function", function: { name: "f", parameters: {} } }],
+			},
+			{ headers: { "Auto-Router-Semantic": "OFF" } },
+		);
+		expect(detector.calls).toBe(0);
+		expect(forwarded?.model).toBe("anthropic/claude-sonnet-5");
+		expect(forwarded?.models).toBeUndefined();
+		expect(forwarded?.provider).toEqual({ require_parameters: true });
+	});
+
+	test("Auto-Router-Capabilities limits which capabilities can be required", async () => {
+		const { forwarded, detector } = await send(
+			{ model: "anthropic/claude-sonnet-5", messages },
+			{
+				semantic: { "social.x.search": 0.95, ...webSearch },
+				headers: { "Auto-Router-Capabilities": " web.search " },
+			},
+		);
+		expect(detector.scopes).toEqual([["web.search"]]);
+		// X Search は対象外なので override されず、web search tool の注入だけが行われる。
+		expect(forwarded).toEqual({
+			model: "anthropic/claude-sonnet-5",
+			messages,
+			tools: [{ type: "openrouter:web_search" }],
+		});
+	});
+
+	test.each([
+		["Auto-Router-Semantic", "maybe"],
+		["Auto-Router-Capabilities", "web.search,unknown.cap"],
+		["Auto-Router-Capabilities", "web.search,"],
+		["Auto-Router-Capabilities", ""],
+	])("invalid %s: %p → invalid_router_request", async (header, value) => {
+		const { res, upstream, detector } = await send(
+			{ model: "anthropic/claude-sonnet-5", messages },
+			{ headers: { [header]: value } },
+		);
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as {
+			error: { code: string; metadata: { header: string } };
+		};
+		expect(body.error.code).toBe("invalid_router_request");
+		expect(body.error.metadata.header).toBe(header);
+		expect(detector.calls).toBe(0);
+		expect(upstream.requests).toHaveLength(0);
+	});
+});

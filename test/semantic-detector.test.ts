@@ -160,6 +160,41 @@ describe("createSemanticDetector", () => {
 		]);
 	});
 
+	test("asks Jev only about the capabilities in the request scope", async () => {
+		const jev = fakeJev(async (_state, questions) =>
+			Object.fromEntries(Object.keys(questions).map((id) => [id, 0.9])),
+		);
+		const detector = createSemanticDetector({ jev });
+
+		const result = await detector.detect(conversation, {
+			apiKey: "k",
+			capabilities: ["web.search"],
+		});
+
+		const call = jev.calls[0] as { questions: Record<string, unknown> };
+		expect(Object.keys(call.questions)).toEqual(["web.search"]);
+		expect(result.requirements.map((r) => r.capability)).toEqual([
+			"web.search",
+		]);
+	});
+
+	test("empty scope disables detection without calling Jev", async () => {
+		const jev = fakeJev(async () => ({}));
+		const result = await createSemanticDetector({
+			jev,
+			capabilities: ["web.search"],
+		}).detect(conversation, {
+			apiKey: "k",
+			capabilities: ["social.x.search"],
+		});
+		expect(result).toEqual({
+			status: "disabled",
+			requirements: [],
+			messagesUsed: 0,
+		});
+		expect(jev.calls).toHaveLength(0);
+	});
+
 	test("skips Jev when there is no user message", async () => {
 		const jev = fakeJev(async () => ({}));
 		const detector = createSemanticDetector({ jev });

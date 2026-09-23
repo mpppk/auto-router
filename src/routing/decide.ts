@@ -1,4 +1,5 @@
 import type { ModelCatalogSource } from "../catalog/model-catalog";
+import type { Capability } from "../core/capabilities";
 import type { RequestedModelChain } from "../core/model-chain";
 import { type RouteResolution, resolveRoute } from "../core/resolver";
 import {
@@ -6,6 +7,7 @@ import {
 	type StructuralAnalysis,
 } from "../core/structural";
 import type { RequestFeatures, RoutingContext } from "../core/types";
+import type { SemanticOptions } from "../http/router-options";
 import type { SemanticDetection, SemanticDetector } from "../semantic/detector";
 
 export interface RoutingDeps {
@@ -19,6 +21,8 @@ export interface RoutingDecision {
 	semantic: SemanticDetection;
 	structural: StructuralAnalysis;
 	features: RequestFeatures;
+	/** caller が `Auto-Router-Capabilities` で限定した semantic capability。 */
+	semanticScope?: Capability[];
 	latencyMs: { jev?: number; routing: number };
 }
 
@@ -31,6 +35,8 @@ export const decideRoute = async (
 		context: RoutingContext;
 		requestedChain: RequestedModelChain;
 		allowModelOverride: boolean;
+		/** 未指定なら全 semantic capability を判定する。 */
+		semantic?: SemanticOptions;
 		apiKey: string;
 		signal?: AbortSignal;
 	},
@@ -39,11 +45,21 @@ export const decideRoute = async (
 	const now = deps.now ?? Date.now;
 	const started = now();
 	const structural = detectStructuralRequirements(input.context.features);
+	const options = input.semantic ?? { enabled: true };
 	const [semantic, catalog] = await Promise.all([
-		deps.detector.detect(input.context, {
-			apiKey: input.apiKey,
-			...(input.signal ? { signal: input.signal } : {}),
-		}),
+		options.enabled
+			? deps.detector.detect(input.context, {
+					apiKey: input.apiKey,
+					...(input.signal ? { signal: input.signal } : {}),
+					...(options.capabilities
+						? { capabilities: options.capabilities }
+						: {}),
+				})
+			: Promise.resolve<SemanticDetection>({
+					status: "disabled",
+					requirements: [],
+					messagesUsed: 0,
+				}),
 		deps.catalog.load(),
 	]);
 
@@ -62,6 +78,9 @@ export const decideRoute = async (
 		semantic,
 		structural,
 		features: input.context.features,
+		...(options.enabled && options.capabilities
+			? { semanticScope: options.capabilities }
+			: {}),
 		latencyMs: {
 			...(semantic.latencyMs !== undefined ? { jev: semantic.latencyMs } : {}),
 			routing: now() - started,

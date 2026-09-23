@@ -23,6 +23,7 @@ export const handleInspect = async (
 			context: prepared.context,
 			requestedChain: prepared.requestedChain,
 			allowModelOverride: prepared.options.allowModelOverride,
+			semantic: prepared.options.semantic,
 			apiKey: prepared.apiKey,
 			signal: request.signal,
 		},
