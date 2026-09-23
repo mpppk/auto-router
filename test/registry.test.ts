@@ -66,6 +66,7 @@ describe("SEMANTIC_REGISTRY", () => {
 		);
 		expect(def.support("a", profile())).toBe("unsupported");
 		expect(def.support("a", undefined)).toBe("unknown");
+		expect(def.support(DEFAULT_GROK_MODEL, undefined)).toBe("supported");
 	});
 
 	test.each([
