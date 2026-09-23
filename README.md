@@ -69,6 +69,7 @@ OpenAI / OpenRouter 互換の base URL として `https://<host>/api/v1` を指�
 | `Auto-Router-Debug` | `false` | `true` で詳細 trace (candidate ごとの conflict 詳細、tool_choice、provider 等) を保存 |
 | `Auto-Router-Semantic` | `on` | `off` で semantic routing を無効化。Jev を呼ばず semantic requirement なしとして扱う (structural requirement と Hard Requirement 保持はそのまま) |
 | `Auto-Router-Capabilities` | (全 capability) | semantic routing で判定する capability を `,` 区切りで限定 (例: `web.search,social.x.search`)。指定外の capability は Jev に問い合わせず、required にならない |
+| `Auto-Router-Allow-Capability-Degrade` | (なし) | required と判定された capability を別の capability に置き換えてよい組み合わせを `from=to` の `,` 区切りで許可 (例: `places.search=web.search,geo.proximity=web.search`)。下記「Places / Maps」参照 |
 
 `Auto-Router-*` header は upstream には転送しません。値は前後の空白を無視し、真偽値は `true` / `false`、on / off は `on` / `off`、一覧は `,` 区切りで指定します。不正な値 (未知の capability、空要素等) は `invalid_router_request` (400) になります。
 
@@ -95,6 +96,7 @@ response body / SSE は変更せず、routing summary を header で返します
 | `Auto-Router-Selected-Model` | upstream に送った effective model chain (`,` 区切り、先頭が primary) |
 | `Auto-Router-Route-Reason` | `requested_model` / `filtered_fallback_chain` / `capability_override` / `capability_not_supported` / `degraded` |
 | `Auto-Router-Degraded` | Jev 障害で semantic 判定ができなかった場合 `true` |
+| `Auto-Router-Degraded-Capabilities` | `Auto-Router-Allow-Capability-Degrade` により capability を置き換えた場合のみ。`from=to` の `,` 区切り |
 
 ### Errors
 
@@ -121,6 +123,20 @@ auto-router 側の負担 (Worker の CPU / request、Jev 呼び出し、D1 書�
 
 - Jev が 401 (API key 拒否) を返した場合は degraded として続行せず、upstream も呼ばずに `401 invalid_api_key` を返します (trace は保存しない)。403 等の他のエラーは key の model 制限等でも起こるため、従来どおり degraded として扱います
 - upstream が 401 を返した場合は response をそのまま返しますが、trace は保存しません (`Auto-Router-Trace-Id` も付与しない)
+
+### Places / Maps
+
+Places / Maps 系 (`places.search` / `places.opening_hours` / `places.reviews` / `geo.proximity` / `source.google_maps`) は実行 route を持たないため、required と判定されると `capability_not_supported` (422) になります。Web Search へ黙って degrade することはしません。
+
+「渋谷駅周辺でおすすめのラーメン屋を探して」のように通常の Web Search でも実用的に答えられる request のために、caller が `Auto-Router-Allow-Capability-Degrade` で明示的に許可した場合だけ degrade します。
+
+- 許可できる組み合わせ: `places.search` / `places.opening_hours` / `places.reviews` / `geo.proximity` → `web.search`
+- `source.google_maps` は source 指定 (Google Maps のデータが必要) が明確なため degrade 対象外。required なら許可に関わらず 422
+- required な capability が1つでも degrade 未許可なら 422 (一部だけ許可しても通らない)
+- degrade した場合は `Auto-Router-Degraded-Capabilities` response header と trace の `capabilityDegrades` に記録する。trace の `semanticRequirements` には置き換え前の Jev の判定を残す
+- 置き換え後の `web.search` は通常の Hard Requirement として扱う (tool 注入、tools 非対応 model なら default route へ override)
+
+threshold は変更していません。現在の eval dataset では Places 系は 0.5〜0.9 のどの threshold でも precision / recall 1.00 で、上記のラーメン屋の例は実際に `places.search` が必要な request (true positive) のため、threshold を上げても正しく解決できないためです。
 
 ### Capability default route
 

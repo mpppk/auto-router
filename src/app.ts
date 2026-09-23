@@ -56,6 +56,7 @@ export const EXPOSED_HEADERS = [
 	"Auto-Router-Selected-Model",
 	"Auto-Router-Route-Reason",
 	"Auto-Router-Degraded",
+	"Auto-Router-Degraded-Capabilities",
 ];
 
 export const createTraceStore = (env: Partial<Bindings> | undefined) =>

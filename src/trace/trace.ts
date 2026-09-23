@@ -33,6 +33,11 @@ export interface RoutingTrace {
 	semanticStatus: "ok" | "skipped" | "degraded" | "disabled";
 	/** `Auto-Router-Capabilities` で判定対象を限定した場合のみ。 */
 	semanticScope?: string[];
+	/**
+	 * `Auto-Router-Allow-Capability-Degrade` により実際に置き換えた capability。
+	 * `semanticRequirements` は置き換え前 (Jev の判定そのまま) を記録する。
+	 */
+	capabilityDegrades: Array<{ from: string; to: string }>;
 	semanticRequirements: Array<{
 		capability: string;
 		requiredProbability: number;
@@ -178,6 +183,7 @@ export const buildRoutingTrace = (input: {
 		...(decision.semanticScope
 			? { semanticScope: decision.semanticScope }
 			: {}),
+		capabilityDegrades: decision.capabilityDegrades.map((d) => ({ ...d })),
 		semanticRequirements: semantic.requirements.map((r) => ({
 			capability: r.capability,
 			requiredProbability: r.requiredProbability,

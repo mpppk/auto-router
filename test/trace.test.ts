@@ -279,6 +279,28 @@ describe("GET /api/v1/auto-router/traces/:traceId", () => {
 		expect(trace.billing).toEqual({ jev: true, serverTools: [] });
 	});
 
+	test("records applied capability degrades with the original Jev decision", async () => {
+		const { app } = setup({ "places.search": 0.95 });
+		const res = await request(
+			app,
+			"/api/v1/chat/completions",
+			{ model: "anthropic/claude-sonnet-5", messages },
+			{ "Auto-Router-Allow-Capability-Degrade": "places.search=web.search" },
+		);
+		const trace = (await (
+			await getTrace(app, res.headers.get("Auto-Router-Trace-Id") ?? "")
+		).json()) as RoutingTrace;
+		expect(trace.capabilityDegrades).toEqual([
+			{ from: "places.search", to: "web.search" },
+		]);
+		expect(trace.semanticRequirements).toContainEqual({
+			capability: "places.search",
+			requiredProbability: 0.95,
+			decision: "required",
+		});
+		expect(trace.billing.serverTools).toEqual(["web_search"]);
+	});
+
 	test("another API key cannot read the trace", async () => {
 		const { app } = setup();
 		const res = await request(app, "/api/v1/chat/completions", {

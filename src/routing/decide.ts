@@ -1,5 +1,9 @@
 import type { ModelCatalogSource } from "../catalog/model-catalog";
-import type { Capability } from "../core/capabilities";
+import {
+	applyCapabilityDegrades,
+	type Capability,
+	type CapabilityDegrade,
+} from "../core/capabilities";
 import type { RequestedModelChain } from "../core/model-chain";
 import { type RouteResolution, resolveRoute } from "../core/resolver";
 import {
@@ -25,6 +29,8 @@ export interface RoutingDecision {
 	features: RequestFeatures;
 	/** 最新 user message 以降の assistant tool call 数 (agent loop のターン)。 */
 	agentLoopTurns: number;
+	/** 実際に適用した capability degrade (`Auto-Router-Allow-Capability-Degrade`)。 */
+	capabilityDegrades: CapabilityDegrade[];
 	/** caller が `Auto-Router-Capabilities` で限定した semantic capability。 */
 	semanticScope?: Capability[];
 	latencyMs: { jev?: number; routing: number };
@@ -41,6 +47,8 @@ export const decideRoute = async (
 		allowModelOverride: boolean;
 		/** 未指定なら全 semantic capability を判定する。 */
 		semantic?: SemanticOptions;
+		/** caller が許可した capability degrade。 */
+		capabilityDegrades?: readonly CapabilityDegrade[];
 		apiKey: string;
 		signal?: AbortSignal;
 	},
@@ -67,9 +75,13 @@ export const decideRoute = async (
 		deps.catalog.load(),
 	]);
 
+	const degraded = applyCapabilityDegrades(
+		semantic.requirements,
+		input.capabilityDegrades ?? [],
+	);
 	const resolution = resolveRoute({
 		requestedChain: input.requestedChain,
-		semanticRequirements: semantic.requirements,
+		semanticRequirements: degraded.requirements,
 		semanticDegraded: semantic.status === "degraded",
 		structural,
 		features: input.context.features,
@@ -86,6 +98,7 @@ export const decideRoute = async (
 		structural,
 		features: input.context.features,
 		agentLoopTurns: input.context.agentLoopTurns,
+		capabilityDegrades: degraded.applied,
 		...(options.enabled && options.capabilities
 			? { semanticScope: options.capabilities }
 			: {}),

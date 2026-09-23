@@ -1,6 +1,7 @@
 import type { RoutingTrace } from "./trace";
 
 export const TRACE_ID_HEADER = "Auto-Router-Trace-Id";
+export const DEGRADED_CAPABILITIES_HEADER = "Auto-Router-Degraded-Capabilities";
 
 /**
  * 通常 response に付与する routing summary header。body / SSE は変更しない。
@@ -18,4 +19,12 @@ export const summaryHeaders = (
 		: {}),
 	"Auto-Router-Route-Reason": trace.reason,
 	"Auto-Router-Degraded": String(trace.degraded !== undefined),
+	// caller が許可した capability degrade を適用した場合 (`from=to`、`,` 区切り)。silent にしない。
+	...(trace.capabilityDegrades.length > 0
+		? {
+				[DEGRADED_CAPABILITIES_HEADER]: trace.capabilityDegrades
+					.map((d) => `${d.from}=${d.to}`)
+					.join(","),
+			}
+		: {}),
 });
