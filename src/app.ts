@@ -1,7 +1,17 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import {
+	createOpenRouterModelCatalogSource,
+	type ModelCatalogSource,
+} from "./catalog/model-catalog";
 import { RouterError } from "./core/errors";
 import { handleChatCompletions } from "./http/chat-completions";
+import type { RoutingDeps } from "./routing/decide";
+import {
+	createSemanticDetector,
+	type SemanticDetector,
+} from "./semantic/detector";
+import { createJevClient } from "./semantic/jev-client";
 import {
 	DEFAULT_OPENROUTER_BASE_URL,
 	type UpstreamConfig,
@@ -9,6 +19,8 @@ import {
 
 export interface AppDeps {
 	upstream?: Partial<UpstreamConfig>;
+	detector?: SemanticDetector;
+	catalog?: ModelCatalogSource;
 }
 
 /** browser から読めるようにする auto-router 独自response header。 */
@@ -25,6 +37,12 @@ export const createApp = (deps: AppDeps = {}) => {
 		baseUrl: deps.upstream?.baseUrl ?? DEFAULT_OPENROUTER_BASE_URL,
 		fetch: deps.upstream?.fetch ?? ((input, init) => fetch(input, init)),
 	};
+	const routing: RoutingDeps = {
+		detector:
+			deps.detector ??
+			createSemanticDetector({ jev: createJevClient(upstream) }),
+		catalog: deps.catalog ?? createOpenRouterModelCatalogSource(upstream),
+	};
 
 	const app = new Hono<{ Bindings: Env }>();
 
@@ -34,7 +52,7 @@ export const createApp = (deps: AppDeps = {}) => {
 
 	for (const prefix of ["/api/v1", "/v1"]) {
 		app.post(`${prefix}/chat/completions`, (c) =>
-			handleChatCompletions(c.req.raw, { upstream }),
+			handleChatCompletions(c.req.raw, { upstream, ...routing }),
 		);
 		// 未対応の endpoint は黙って proxy せず明示的にエラーにする。
 		app.all(`${prefix}/*`, (c) => {

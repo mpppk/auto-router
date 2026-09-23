@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import OpenAI from "openai";
-import { createApp } from "../src/app";
-import { createFakeUpstream, sseResponse } from "./helpers/fake-upstream";
-
-const BASE = "https://openrouter.test/api/v1";
+import type { createApp } from "../src/app";
+import { UPSTREAM_BASE as BASE, createTestApp } from "./helpers/app";
+import { sseResponse } from "./helpers/fake-upstream";
 
 const post = (
 	app: ReturnType<typeof createApp>,
@@ -23,10 +22,7 @@ const post = (
 
 describe("POST /api/v1/chat/completions", () => {
 	test("forwards the raw body, BYOK Authorization and OpenRouter headers", async () => {
-		const upstream = createFakeUpstream();
-		const app = createApp({
-			upstream: { baseUrl: BASE, fetch: upstream.fetch },
-		});
+		const { app, upstream } = createTestApp();
 		const raw = `{"model":"openai/gpt-5","messages":[{"role":"user","content":"hi"}],"unknown_ext":{"a":1},"big":12345678901234567890}`;
 
 		const res = await post(app, "/api/v1/chat/completions", raw, {
@@ -52,8 +48,8 @@ describe("POST /api/v1/chat/completions", () => {
 
 	test("forwards a non-stream response without rebuilding the body", async () => {
 		const upstreamBody = `{"id":"gen-1", "choices":[],   "extra":"kept"}`;
-		const upstream = createFakeUpstream(
-			() =>
+		const { app } = createTestApp({
+			respond: () =>
 				new Response(upstreamBody, {
 					status: 200,
 					headers: {
@@ -62,9 +58,6 @@ describe("POST /api/v1/chat/completions", () => {
 						"set-cookie": "__cf_bm=1; Domain=openrouter.ai",
 					},
 				}),
-		);
-		const app = createApp({
-			upstream: { baseUrl: BASE, fetch: upstream.fetch },
 		});
 
 		const res = await post(app, "/api/v1/chat/completions", {
@@ -84,9 +77,8 @@ describe("POST /api/v1/chat/completions", () => {
 			'data: {"choices":[{"delta":{"content":"llo"}}]}\n\n',
 			"data: [DONE]\n\n",
 		];
-		const upstream = createFakeUpstream(() => sseResponse(chunks));
-		const app = createApp({
-			upstream: { baseUrl: BASE, fetch: upstream.fetch },
+		const { app } = createTestApp({
+			respond: () => sseResponse(chunks),
 		});
 
 		const res = await post(app, "/api/v1/chat/completions", {
@@ -100,14 +92,12 @@ describe("POST /api/v1/chat/completions", () => {
 	});
 
 	test("forwards upstream errors with their status", async () => {
-		const upstream = createFakeUpstream(() =>
-			Response.json(
-				{ error: { code: 402, message: "no credits" } },
-				{ status: 402 },
-			),
-		);
-		const app = createApp({
-			upstream: { baseUrl: BASE, fetch: upstream.fetch },
+		const { app } = createTestApp({
+			respond: () =>
+				Response.json(
+					{ error: { code: 402, message: "no credits" } },
+					{ status: 402 },
+				),
 		});
 
 		const res = await post(app, "/api/v1/chat/completions", {
@@ -121,10 +111,7 @@ describe("POST /api/v1/chat/completions", () => {
 	});
 
 	test("/v1/chat/completions uses the same handler", async () => {
-		const upstream = createFakeUpstream();
-		const app = createApp({
-			upstream: { baseUrl: BASE, fetch: upstream.fetch },
-		});
+		const { app, upstream } = createTestApp();
 
 		const res = await post(app, "/v1/chat/completions", {
 			model: "a",
@@ -136,10 +123,7 @@ describe("POST /api/v1/chat/completions", () => {
 	});
 
 	test("requires Authorization", async () => {
-		const upstream = createFakeUpstream();
-		const app = createApp({
-			upstream: { baseUrl: BASE, fetch: upstream.fetch },
-		});
+		const { app, upstream } = createTestApp();
 
 		const res = await app.request("/api/v1/chat/completions", {
 			method: "POST",
@@ -162,10 +146,7 @@ describe("POST /api/v1/chat/completions", () => {
 			{ "Auto-Router-Debug": "yes" },
 		],
 	])("returns invalid_router_request for %s", async (_, body, headers) => {
-		const upstream = createFakeUpstream();
-		const app = createApp({
-			upstream: { baseUrl: BASE, fetch: upstream.fetch },
-		});
+		const { app, upstream } = createTestApp();
 
 		const res = await post(app, "/api/v1/chat/completions", body, headers);
 
@@ -185,10 +166,7 @@ describe("unsupported endpoints", () => {
 		["POST", "/v1/embeddings"],
 		["GET", "/api/v1/chat/completions"],
 	])("%s %s returns unsupported_endpoint", async (method, path) => {
-		const upstream = createFakeUpstream();
-		const app = createApp({
-			upstream: { baseUrl: BASE, fetch: upstream.fetch },
-		});
+		const { app, upstream } = createTestApp();
 
 		const res = await app.request(path, {
 			method,
@@ -206,10 +184,7 @@ describe("unsupported endpoints", () => {
 
 describe("CORS", () => {
 	test("exposes Auto-Router headers", async () => {
-		const upstream = createFakeUpstream();
-		const app = createApp({
-			upstream: { baseUrl: BASE, fetch: upstream.fetch },
-		});
+		const { app } = createTestApp();
 
 		const res = await post(
 			app,
@@ -225,10 +200,7 @@ describe("CORS", () => {
 });
 
 describe("OpenAI SDK compatibility", () => {
-	const createClient = (upstream: ReturnType<typeof createFakeUpstream>) => {
-		const app = createApp({
-			upstream: { baseUrl: BASE, fetch: upstream.fetch },
-		});
+	const createClient = (app: ReturnType<typeof createApp>) => {
 		return new OpenAI({
 			baseURL: "https://auto-router.test/api/v1",
 			apiKey: "sk-or-test",
@@ -237,22 +209,23 @@ describe("OpenAI SDK compatibility", () => {
 	};
 
 	test("chat.completions.create works by swapping baseURL and apiKey", async () => {
-		const upstream = createFakeUpstream(() =>
-			Response.json({
-				id: "gen-1",
-				object: "chat.completion",
-				created: 0,
-				model: "openai/gpt-5",
-				choices: [
-					{
-						index: 0,
-						finish_reason: "stop",
-						message: { role: "assistant", content: "hello" },
-					},
-				],
-			}),
-		);
-		const client = createClient(upstream);
+		const { app, upstream } = createTestApp({
+			respond: () =>
+				Response.json({
+					id: "gen-1",
+					object: "chat.completion",
+					created: 0,
+					model: "openai/gpt-5",
+					choices: [
+						{
+							index: 0,
+							finish_reason: "stop",
+							message: { role: "assistant", content: "hello" },
+						},
+					],
+				}),
+		});
+		const client = createClient(app);
 
 		const completion = await client.chat.completions.create({
 			model: "openai/gpt-5",
@@ -271,14 +244,15 @@ describe("OpenAI SDK compatibility", () => {
 	});
 
 	test("streaming works", async () => {
-		const upstream = createFakeUpstream(() =>
-			sseResponse([
-				'data: {"id":"gen-1","object":"chat.completion.chunk","created":0,"model":"a","choices":[{"index":0,"delta":{"content":"he"}}]}\n\n',
-				'data: {"id":"gen-1","object":"chat.completion.chunk","created":0,"model":"a","choices":[{"index":0,"delta":{"content":"llo"},"finish_reason":"stop"}]}\n\n',
-				"data: [DONE]\n\n",
-			]),
-		);
-		const client = createClient(upstream);
+		const { app } = createTestApp({
+			respond: () =>
+				sseResponse([
+					'data: {"id":"gen-1","object":"chat.completion.chunk","created":0,"model":"a","choices":[{"index":0,"delta":{"content":"he"}}]}\n\n',
+					'data: {"id":"gen-1","object":"chat.completion.chunk","created":0,"model":"a","choices":[{"index":0,"delta":{"content":"llo"},"finish_reason":"stop"}]}\n\n',
+					"data: [DONE]\n\n",
+				]),
+		});
+		const client = createClient(app);
 
 		const stream = await client.chat.completions.create({
 			model: "a",
