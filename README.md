@@ -55,11 +55,29 @@ OpenAI / OpenRouter 互換の base URL として `https://<host>/api/v1` を指�
 | Endpoint | 内容 |
 | --- | --- |
 | `POST /api/v1/chat/completions` (`/v1/chat/completions`) | capability-aware routing 付き Chat Completions proxy |
-| `POST /api/v1/auto-router/inspect` | 同じ request の routing decision を返す。upstream model は呼ばない |
+| `POST /api/v1/responses` (`/v1/responses`) | 同じ routing を行う OpenAI Responses API 互換 proxy |
+| `POST /api/v1/messages` (`/v1/messages`) | 同じ routing を行う Anthropic Messages API 互換 proxy |
+| `POST /api/v1/auto-router/inspect[?endpoint=chat_completions\|responses\|messages]` | 同じ形式の request の routing decision を返す。upstream model は呼ばない |
 | `GET /api/v1/auto-router/traces/:traceId` | 実行済み routing trace を返す (同じ API key からのみ取得可) |
 | `GET /api/v1/models` (`/v1/models`) | OpenRouter `GET /models` をそのまま透過 (query string / Authorization も透過)。OpenAI 互換 client の接続確認・model 選択 UI 用 |
 
-上記以外の endpoint (`/responses`、`/completions`、`/embeddings` 等の generation endpoint を含む) は黙って proxy せず `unsupported_endpoint` (404) を返します。
+上記以外の endpoint (`/completions`、`/embeddings`、`/messages/count_tokens` 等) は黙って proxy せず `unsupported_endpoint` (404) を返します。
+
+API key は `Authorization: Bearer <key>` のほか、Anthropic SDK 形式の `x-api-key` でも受け付けます (OpenRouter も両方を受け付けるため、そのまま転送します)。
+
+### Responses API / Anthropic Messages
+
+routing core は endpoint 形式に依存せず、adapter (`src/adapters/`) が request を routing context に変換し、決定した route を endpoint 固有形式で patch します。header・trace・Hard Requirement 保持・default route override はすべて Chat Completions と同じです。server tool は3形式とも OpenRouter の `openrouter:web_search` (X Search は `parameters.engine: native` + `x_search`) を `tools` に追加します。
+
+| | Responses (`/responses`) | Messages (`/messages`) |
+| --- | --- | --- |
+| client 設定 | OpenAI SDK `baseURL: https://<host>/api/v1` | Anthropic SDK `baseURL: https://<host>/api`、Claude Code は `ANTHROPIC_BASE_URL=https://<host>/api` |
+| 会話 / 指示 | `input` (string / message item) / `instructions` と system・developer message | `messages` / `system` |
+| agent loop | `function_call` item (連続する並列 call は1ターン)。`function_call_output` は context に含めない | `tool_use` を含む assistant message。`tool_result` だけの user message は新しい user turn として扱わない |
+| structural | `input_image` / `input_file` / `input_audio`、function tools、`text.format` (json_schema / json_object)、`reasoning` | `image` / `document`、client tools (`input_schema`)、`output_config.format` (`output_format`)、`thinking` (disabled 以外) |
+| tool_choice の patch | `"auto"` | `{type: "auto"}` (`disable_parallel_tool_use` 等は保持) |
+
+`model` + `models` (OpenRouter の model fallback) と `provider` は3形式共通です。
 
 ### Request headers
 

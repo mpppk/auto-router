@@ -218,8 +218,8 @@ describe("GET /models", () => {
 
 describe("unsupported endpoints", () => {
 	test.each([
-		["POST", "/api/v1/responses"],
-		["POST", "/api/v1/messages"],
+		["GET", "/api/v1/responses/resp_123"],
+		["POST", "/api/v1/messages/count_tokens"],
 		["POST", "/v1/completions"],
 		["POST", "/v1/embeddings"],
 		["GET", "/api/v1/chat/completions"],

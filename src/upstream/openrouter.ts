@@ -59,10 +59,18 @@ export const buildUpstreamHeaders = (
 	return headers;
 };
 
-/** `Authorization: Bearer <key>` から key を取り出す。key自体は保存・ログしない。 */
-export const getBearerToken = (headers: Headers): string | undefined => {
+/**
+ * caller の OpenRouter API key を取り出す。key自体は保存・ログしない。
+ * `Authorization: Bearer <key>` を優先し、無ければ Anthropic SDK 形式の `x-api-key` を使う
+ * (OpenRouter はどちらも受け付ける)。
+ */
+export const getApiKey = (headers: Headers): string | undefined => {
 	const match = /^Bearer\s+(\S+)\s*$/i.exec(headers.get("authorization") ?? "");
-	return match?.[1];
+	if (match?.[1] !== undefined) return match[1];
+	const apiKey = headers.get("x-api-key")?.trim();
+	return apiKey === undefined || apiKey === "" || /\s/.test(apiKey)
+		? undefined
+		: apiKey;
 };
 
 /**

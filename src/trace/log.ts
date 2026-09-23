@@ -11,7 +11,7 @@ export type RouterLogEvent =
 	| { event: "invalid_api_key"; source: "jev" | "upstream" };
 
 export interface RoutingDecisionLog {
-	endpoint: "chat_completions" | "inspect";
+	endpoint: "chat_completions" | "responses" | "messages" | "inspect";
 	traceId: string;
 	reason: RoutingTrace["reason"];
 	/** requested chain に無い model に置き換えたか。 */

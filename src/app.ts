@@ -7,8 +7,13 @@ import {
 } from "./catalog/model-catalog";
 import { parseModelList } from "./config";
 import { RouterError } from "./core/errors";
-import { handleChatCompletions, type TraceDeps } from "./http/chat-completions";
-import { handleGetTrace, handleInspect } from "./http/debug";
+import { handleGetTrace, handleInspect, inspectEndpoint } from "./http/debug";
+import {
+	GENERATION_ENDPOINTS,
+	type GenerationEndpoint,
+	handleGeneration,
+	type TraceDeps,
+} from "./http/generation";
 import { enforceRateLimit, type RateLimiter } from "./http/rate-limit";
 import type { RoutingDeps } from "./routing/decide";
 import {
@@ -171,20 +176,26 @@ export const createApp = (deps: AppDeps = {}) => {
 	app.use("/v1/*", rateLimit);
 
 	app.post("/api/v1/auto-router/inspect", (c) =>
-		handleInspect(c.req.raw, routingDeps(c)),
+		handleInspect(
+			c.req.raw,
+			routingDeps(c),
+			inspectEndpoint(c.req.query("endpoint")),
+		),
 	);
 	app.get("/api/v1/auto-router/traces/:traceId", (c) =>
 		handleGetTrace(c.req.raw, c.req.param("traceId"), traceDeps(c)),
 	);
 
 	for (const prefix of ["/api/v1", "/v1"]) {
-		app.post(`${prefix}/chat/completions`, (c) =>
-			handleChatCompletions(c.req.raw, {
-				upstream,
-				...routingDeps(c),
-				trace: traceDeps(c),
-			}),
-		);
+		for (const endpoint of GENERATION_ENDPOINTS) {
+			app.post(`${prefix}${endpoint.upstreamPath}`, (c) =>
+				handleGeneration(
+					c.req.raw,
+					{ upstream, ...routingDeps(c), trace: traceDeps(c) },
+					endpoint as GenerationEndpoint<unknown>,
+				),
+			);
+		}
 		// model 一覧は generation endpoint ではないため OpenRouter の response をそのまま返す (#23)。
 		// OpenAI 互換 client が接続確認・model 選択 UI で `GET {baseURL}/models` を呼ぶ。
 		app.get(`${prefix}/models`, async (c) => {
@@ -201,7 +212,10 @@ export const createApp = (deps: AppDeps = {}) => {
 		app.all(`${prefix}/*`, (c) => {
 			throw new RouterError(
 				"unsupported_endpoint",
-				`auto-router does not support ${c.req.method} ${c.req.path}. Supported: POST ${prefix}/chat/completions, GET ${prefix}/models`,
+				`auto-router does not support ${c.req.method} ${c.req.path}. Supported: ${[
+					...GENERATION_ENDPOINTS.map((e) => `POST ${prefix}${e.upstreamPath}`),
+					`GET ${prefix}/models`,
+				].join(", ")}`,
 				{ method: c.req.method, path: c.req.path },
 			);
 		});

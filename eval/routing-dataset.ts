@@ -18,6 +18,8 @@ export interface RoutingGoldCase {
 	allowModelOverride?: boolean;
 	/** `Auto-Router-*` 等の追加 request header。 */
 	headers?: Record<string, string>;
+	/** request の形式 (#30)。未指定なら Chat Completions。 */
+	endpoint?: "chat_completions" | "responses" | "messages";
 	/** Worker var `DEFAULT_ROUTE_MODELS` の設定値。未指定なら registry の既定値。 */
 	defaultRouteModels?: string[];
 	expected:
@@ -715,5 +717,122 @@ export const ROUTING_GOLD_DATASET: RoutingGoldCase[] = [
 			effectiveChain: [CLAUDE, GPT],
 			reason: "filtered_fallback_chain",
 		},
+	},
+
+	// --- Responses API (#30) ---
+	{
+		id: "responses-x-search-override",
+		tags: ["endpoint", "responses", "tools"],
+		endpoint: "responses",
+		request: {
+			model: CLAUDE,
+			input: [
+				{
+					role: "user",
+					content: [{ type: "input_text", text: X_QUESTION[0]?.content }],
+				},
+			],
+			instructions: "簡潔に答えてください",
+			tools: [{ type: "function", name: "save_note", parameters: {} }],
+			tool_choice: { type: "function", name: "save_note" },
+		},
+		semantic: X,
+		expected: { effectiveChain: DEFAULT_ROUTE, reason: "capability_override" },
+	},
+	{
+		id: "responses-web-search-tool-injection",
+		tags: ["endpoint", "responses", "tools"],
+		endpoint: "responses",
+		request: { model: CLAUDE, input: "今日の主要なニュースを教えて" },
+		semantic: { "web.search": 0.95 },
+		expected: { effectiveChain: [CLAUDE], reason: "requested_model" },
+	},
+	{
+		id: "responses-structured-output-filters-text-only",
+		tags: ["endpoint", "responses", "structural"],
+		endpoint: "responses",
+		request: {
+			model: TEXT_ONLY,
+			models: [GPT],
+			input: "今日のドル円レートをJSONで",
+			text: { format: { type: "json_schema", name: "r", schema: {} } },
+		},
+		semantic: { "web.search": 0.95 },
+		expected: { effectiveChain: [GPT], reason: "filtered_fallback_chain" },
+	},
+
+	// --- Anthropic Messages API (#30) ---
+	{
+		id: "messages-x-search-override-tool-choice",
+		tags: ["endpoint", "messages", "tools", "tool_choice"],
+		endpoint: "messages",
+		request: {
+			model: CLAUDE,
+			max_tokens: 1024,
+			system: "簡潔に答えてください",
+			messages: X_QUESTION,
+			tools: [{ name: "save_note", input_schema: { type: "object" } }],
+			tool_choice: { type: "tool", name: "save_note" },
+		},
+		semantic: X,
+		expected: { effectiveChain: DEFAULT_ROUTE, reason: "capability_override" },
+	},
+	{
+		id: "messages-agent-loop-tool-result",
+		tags: ["endpoint", "messages", "agent_loop"],
+		endpoint: "messages",
+		request: {
+			model: CLAUDE,
+			max_tokens: 1024,
+			messages: [
+				{ role: "user", content: X_TASK.content },
+				{
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "save first", signature: "EqoB..." },
+						{
+							type: "tool_use",
+							id: "toolu_01",
+							name: "save_note",
+							input: { text: "start" },
+						},
+					],
+				},
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "toolu_01", content: "saved" },
+					],
+				},
+			],
+			tools: [{ name: "save_note", input_schema: { type: "object" } }],
+			thinking: { type: "enabled", budget_tokens: 1024 },
+		},
+		semantic: X,
+		expected: { effectiveChain: DEFAULT_ROUTE, reason: "capability_override" },
+	},
+	{
+		id: "messages-image-x-search",
+		tags: ["endpoint", "messages", "structural"],
+		endpoint: "messages",
+		request: {
+			model: CLAUDE,
+			models: [TEXT_ONLY],
+			max_tokens: 1024,
+			messages: [
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "この画像の製品についてXでの反応を調べて" },
+						{
+							type: "image",
+							source: { type: "url", url: "https://example.com/p.png" },
+						},
+					],
+				},
+			],
+		},
+		semantic: X,
+		expected: { effectiveChain: DEFAULT_ROUTE, reason: "capability_override" },
 	},
 ];

@@ -1,4 +1,4 @@
-import { chatCompletionsAdapter } from "../src/adapters/chat-completions";
+import { normalizeMessagesToolChoice } from "../src/adapters/messages";
 import { createApp } from "../src/app";
 import {
 	createStaticModelCatalog,
@@ -15,6 +15,11 @@ import { normalizeModelChain } from "../src/core/model-chain";
 import { allowsAnyProvider } from "../src/core/provider";
 import { SEMANTIC_REGISTRY, STRUCTURAL_REGISTRY } from "../src/core/registry";
 import { detectStructuralRequirements } from "../src/core/structural";
+import {
+	CHAT_COMPLETIONS_ENDPOINT,
+	GENERATION_ENDPOINTS,
+	type GenerationEndpoint,
+} from "../src/http/generation";
 import {
 	ALLOW_CAPABILITY_DEGRADE_HEADER,
 	parseCapabilityDegrades,
@@ -112,6 +117,7 @@ export const checkForwardedRequest = (input: {
 	forwarded: Record<string, unknown>;
 	hard: readonly Requirement[];
 	catalog: ModelCatalog;
+	endpoint?: GenerationEndpoint<unknown>["name"];
 }) => {
 	const { original, forwarded, hard, catalog } = input;
 	const violations: string[] = [];
@@ -180,7 +186,11 @@ export const checkForwardedRequest = (input: {
 		violations.push("X Search requires engine native and x_search");
 	}
 	if (semantic.has("web.search") || semantic.has("social.x.search")) {
-		const choice = forwarded.tool_choice;
+		// Anthropic Messages の tool_choice は Chat Completions の意味に揃えて検査する。
+		const choice =
+			input.endpoint === "messages"
+				? normalizeMessagesToolChoice(forwarded.tool_choice)
+				: forwarded.tool_choice;
 		if (choice === "none" || (isRecord(choice) && choice.type !== WEB_SEARCH)) {
 			violations.push(
 				`tool_choice ${JSON.stringify(choice)} blocks the required server tool`,
@@ -215,7 +225,8 @@ export const checkForwardedRequest = (input: {
 		if (
 			isRecord(tool) &&
 			typeof tool.type === "string" &&
-			tool.type !== "function"
+			tool.type !== "function" &&
+			tool.type !== "custom"
 		) {
 			const kept = tools.find((t) => isRecord(t) && t.type === tool.type);
 			const callerParams = isRecord(tool.parameters) ? tool.parameters : {};
@@ -302,6 +313,11 @@ const fixedDetector = (
 
 const API_KEY = "sk-or-eval";
 
+const endpointOf = (c: RoutingGoldCase): GenerationEndpoint<unknown> =>
+	(GENERATION_ENDPOINTS.find(
+		(e) => e.name === (c.endpoint ?? "chat_completions"),
+	) ?? CHAT_COMPLETIONS_ENDPOINT) as GenerationEndpoint<unknown>;
+
 export const runRoutingEval = async (
 	options: {
 		thresholds?: ThresholdConfig;
@@ -335,7 +351,8 @@ export const runRoutingEval = async (
 				: {}),
 		});
 		const apiKey = options.live?.apiKey ?? API_KEY;
-		const res = await app.request("/api/v1/chat/completions", {
+		const endpoint = endpointOf(c);
+		const res = await app.request(`/api/v1${endpoint.upstreamPath}`, {
 			method: "POST",
 			headers: {
 				authorization: `Bearer ${apiKey}`,
@@ -367,10 +384,9 @@ export const runRoutingEval = async (
 				: ((await res.json()) as { error?: { code?: string } });
 		const forwarded = forwardedBodies[0];
 
-		const parsed = chatCompletionsAdapter.parseRequest(c.request);
-		const context = chatCompletionsAdapter.extractRoutingContext(parsed);
-		const requestedChain =
-			chatCompletionsAdapter.getRequestedModelChain(parsed);
+		const parsed = endpoint.adapter.parseRequest(c.request);
+		const context = endpoint.adapter.extractRoutingContext(parsed);
+		const requestedChain = endpoint.adapter.getRequestedModelChain(parsed);
 		// Hard Requirement は Jev の判定 (trace) に caller が header で許可した degrade だけを適用したもの。
 		const semanticHard = applyCapabilityDegrades(
 			trace.semanticRequirements.flatMap((r) =>
@@ -418,6 +434,7 @@ export const runRoutingEval = async (
 				forwarded,
 				hard,
 				catalog,
+				endpoint: endpoint.name,
 			});
 			result.violations = check.violations;
 			result.leakage = check.leakage;

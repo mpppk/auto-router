@@ -17,13 +17,23 @@ const CONTENT_PART_CAPABILITY: Record<string, StructuralCapability> = {
 	video: "input.video",
 	file: "input.file",
 	input_file: "input.file",
+	// Anthropic Messages の PDF 等
+	document: "input.file",
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
+/**
+ * caller 定義の tool (model が tool calling に対応している必要がある) か。
+ * Chat Completions / Responses は `type: "function"`、Anthropic Messages は
+ * `type` 無し (または `"custom"`) で `input_schema` を持つ。
+ */
 const isFunctionTool = (tool: unknown) =>
-	isRecord(tool) && tool.type === "function";
+	isRecord(tool) &&
+	(tool.type === "function" ||
+		tool.type === "custom" ||
+		(tool.type === undefined && isRecord(tool.input_schema)));
 
 const reasoningRequested = (features: RequestFeatures): boolean => {
 	const { reasoning, reasoningEffort, includeReasoning } = features;
