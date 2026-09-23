@@ -7,6 +7,7 @@ import {
 import { RouterError } from "../core/errors";
 import type { RoutingContext } from "../core/types";
 import { apiKeyFingerprint } from "../trace/fingerprint";
+import { logRouterEvent } from "../trace/log";
 import { type SemanticCache, semanticCacheKey } from "./cache";
 import {
 	buildSemanticContext,
@@ -189,6 +190,7 @@ export const createSemanticDetector = (
 				const reason: JevFailureReason =
 					err instanceof JevError ? err.reason : "jev_error";
 				if (reason === "jev_unauthorized") {
+					logRouterEvent({ event: "invalid_api_key", source: "jev" });
 					// 不正な key は upstream でも必ず失敗するため、degraded で続行せず 401 にする。
 					throw new RouterError(
 						"invalid_api_key",

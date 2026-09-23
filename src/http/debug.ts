@@ -2,6 +2,7 @@ import { RouterError } from "../core/errors";
 import { decideRoute, type RoutingDeps } from "../routing/decide";
 import { apiKeyFingerprint } from "../trace/fingerprint";
 import { summaryHeaders } from "../trace/headers";
+import { logRouterEvent, routingDecisionLog } from "../trace/log";
 import { buildRoutingTrace, newTraceId } from "../trace/trace";
 import {
 	prepareChatCompletions,
@@ -34,6 +35,10 @@ export const handleInspect = async (
 		id: newTraceId(),
 		decision,
 		detail: "full",
+	});
+	logRouterEvent({
+		event: "routing_decision",
+		...routingDecisionLog(trace, { endpoint: "inspect" }),
 	});
 	const { resolution } = decision;
 

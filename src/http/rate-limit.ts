@@ -1,5 +1,6 @@
 import { RouterError } from "../core/errors";
 import { apiKeyFingerprint } from "../trace/fingerprint";
+import { logRouterEvent } from "../trace/log";
 import { getBearerToken } from "../upstream/openrouter";
 
 /** Workers Rate Limiting binding の必要部分。 */
@@ -17,8 +18,9 @@ export interface RateLimitDeps {
 	periodSeconds: number;
 }
 
-const rateLimited = (scope: "ip" | "key", periodSeconds: number) =>
-	new RouterError(
+const rateLimited = (scope: "ip" | "key", periodSeconds: number) => {
+	logRouterEvent({ event: "rate_limited", scope });
+	return new RouterError(
 		"rate_limited",
 		scope === "ip"
 			? "Too many requests from this IP address. Please retry later."
@@ -26,6 +28,7 @@ const rateLimited = (scope: "ip" | "key", periodSeconds: number) =>
 		{ scope },
 		{ "Retry-After": String(periodSeconds) },
 	);
+};
 
 /**
  * IP / API key fingerprint 単位の rate limit。超過時は 429 (`rate_limited`) を投げる。
