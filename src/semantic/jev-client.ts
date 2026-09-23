@@ -12,7 +12,9 @@ export interface NoulQuestion {
 export type JevFailureReason =
 	| "jev_timeout"
 	| "jev_error"
-	| "jev_invalid_response";
+	| "jev_invalid_response"
+	/** OpenRouter が caller の API key を拒否した (401)。 */
+	| "jev_unauthorized";
 
 export class JevError extends Error {
 	readonly reason: JevFailureReason;
@@ -81,6 +83,9 @@ export const createJevClient = (config: JevClientConfig): JevClient => ({
 				"jev_error",
 				`Jev request failed: ${err instanceof Error ? err.message : String(err)}`,
 			);
+		}
+		if (res.status === 401) {
+			throw new JevError("jev_unauthorized", "Jev rejected the API key");
 		}
 		if (!res.ok) {
 			throw new JevError("jev_error", `Jev returned status ${res.status}`);

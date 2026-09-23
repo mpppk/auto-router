@@ -100,9 +100,24 @@ response body / SSE は変更せず、routing summary を header で返します
 | code | status |
 | --- | --- |
 | `invalid_router_request` | 400 |
-| `missing_authorization` | 401 |
+| `missing_authorization` / `invalid_api_key` | 401 |
 | `unsupported_endpoint` / `trace_not_found` | 404 |
 | `capability_not_supported` / `capability_conflict` | 422 |
+| `rate_limited` | 429 (`Retry-After` 付き) |
+
+### Rate limit / 不正な API key
+
+auto-router 側の負担 (Worker の CPU / request、Jev 呼び出し、D1 書き込み) を抑えるため、`/api/v1/*` `/v1/*` に Workers Rate Limiting binding による制限をかけています (`wrangler.jsonc` の `ratelimits`)。
+
+| Binding | 単位 | 上限 |
+| --- | --- | --- |
+| `RATE_LIMIT_IP` | client IP (`CF-Connecting-IP`) | 300 requests / 60s |
+| `RATE_LIMIT_KEY` | API key の fingerprint (raw key は使わない) | 120 requests / 60s |
+
+超過時は Jev / upstream を呼ばず、trace も保存せずに `429 rate_limited` を返します。Workers Rate Limiting は location ごとの近似的な制限です。
+
+- Jev が 401 (API key 拒否) を返した場合は degraded として続行せず、upstream も呼ばずに `401 invalid_api_key` を返します (trace は保存しない)。403 等の他のエラーは key の model 制限等でも起こるため、従来どおり degraded として扱います
+- upstream が 401 を返した場合は response をそのまま返しますが、trace は保存しません (`Auto-Router-Trace-Id` も付与しない)
 
 ### Routing trace
 

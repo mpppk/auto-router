@@ -73,6 +73,21 @@ describe("createJevClient", () => {
 		await expectReason(jev.noul("s", questions, { apiKey: "k" }), "jev_error");
 	});
 
+	test("401 → jev_unauthorized", async () => {
+		const jev = client(
+			async () => new Response("unauthorized", { status: 401 }),
+		);
+		await expectReason(
+			jev.noul("s", questions, { apiKey: "k" }),
+			"jev_unauthorized",
+		);
+	});
+
+	test("403 (e.g. key restrictions) stays jev_error", async () => {
+		const jev = client(async () => new Response("forbidden", { status: 403 }));
+		await expectReason(jev.noul("s", questions, { apiKey: "k" }), "jev_error");
+	});
+
 	test("network error → jev_error", async () => {
 		const jev = client(async () => {
 			throw new TypeError("fetch failed");
