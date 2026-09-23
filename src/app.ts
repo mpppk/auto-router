@@ -5,6 +5,7 @@ import {
 	createOpenRouterModelCatalogSource,
 	type ModelCatalogSource,
 } from "./catalog/model-catalog";
+import { parseModelList } from "./config";
 import { RouterError } from "./core/errors";
 import { handleChatCompletions, type TraceDeps } from "./http/chat-completions";
 import { handleGetTrace, handleInspect } from "./http/debug";
@@ -39,6 +40,8 @@ export interface AppDeps {
 	catalog?: ModelCatalogSource;
 	/** 指定しない場合は `TRACES_DB` binding (無ければ in-memory) を使う。 */
 	traceStore?: TraceStore;
+	/** 指定しない場合は Worker var `DEFAULT_ROUTE_MODELS` (無ければ registry の既定値) を使う。 */
+	defaultRouteModels?: string[];
 	/** 指定しない場合は `RATE_LIMIT_IP` / `RATE_LIMIT_KEY` binding (無ければ無制限) を使う。 */
 	rateLimiters?: { ip?: RateLimiter; key?: RateLimiter };
 }
@@ -78,10 +81,17 @@ export const createApp = (deps: AppDeps = {}) => {
 		directCatalog ??= createOpenRouterModelCatalogSource(upstream);
 		return directCatalog;
 	};
-	const routingDeps = (c: Context<{ Bindings: Bindings }>): RoutingDeps => ({
-		detector,
-		catalog: catalogFor(c.env as Partial<Bindings> | undefined),
-	});
+	const routingDeps = (c: Context<{ Bindings: Bindings }>): RoutingDeps => {
+		const env = c.env as Partial<Bindings> | undefined;
+		const defaultRouteModels =
+			deps.defaultRouteModels ??
+			parseModelList("DEFAULT_ROUTE_MODELS", env?.DEFAULT_ROUTE_MODELS);
+		return {
+			detector,
+			catalog: catalogFor(env),
+			...(defaultRouteModels ? { defaultRouteModels } : {}),
+		};
+	};
 	const fallbackTraceStore = createMemoryTraceStore();
 
 	const traceDeps = (c: Context<{ Bindings: Bindings }>): TraceDeps => {

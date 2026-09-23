@@ -18,6 +18,8 @@ export interface RoutingGoldCase {
 	allowModelOverride?: boolean;
 	/** `Auto-Router-*` 等の追加 request header。 */
 	headers?: Record<string, string>;
+	/** Worker var `DEFAULT_ROUTE_MODELS` の設定値。未指定なら registry の既定値。 */
+	defaultRouteModels?: string[];
 	expected:
 		| { effectiveChain: string[]; reason: RouteReason }
 		| { error: RouterErrorCode };
@@ -27,6 +29,10 @@ export const CLAUDE = "anthropic/claude-sonnet-5";
 export const GPT = "openai/gpt-5";
 export const GROK = "x-ai/grok-4.7";
 export const GROK_OLD = "x-ai/grok-4.5";
+/** registry の既定 default route の fallback。 */
+export const GROK_FALLBACK = "x-ai/grok-4.6";
+/** registry の既定 default route (DEFAULT_GROK_MODELS)。 */
+const DEFAULT_ROUTE = [GROK, GROK_FALLBACK];
 export const TEXT_ONLY = "text/no-tools";
 
 const X_QUESTION = [
@@ -112,7 +118,7 @@ export const ROUTING_GOLD_DATASET: RoutingGoldCase[] = [
 		tags: ["structural"],
 		request: { model: CLAUDE, messages: IMAGE_QUESTION },
 		semantic: X,
-		expected: { effectiveChain: [GROK], reason: "capability_override" },
+		expected: { effectiveChain: DEFAULT_ROUTE, reason: "capability_override" },
 	},
 	{
 		id: "structural-json-schema-x-search",
@@ -126,7 +132,7 @@ export const ROUTING_GOLD_DATASET: RoutingGoldCase[] = [
 			},
 		},
 		semantic: X,
-		expected: { effectiveChain: [GROK], reason: "capability_override" },
+		expected: { effectiveChain: DEFAULT_ROUTE, reason: "capability_override" },
 	},
 	{
 		id: "structural-function-tools-x-search",
@@ -144,7 +150,7 @@ export const ROUTING_GOLD_DATASET: RoutingGoldCase[] = [
 			reasoning: { effort: "high" },
 		},
 		semantic: X,
-		expected: { effectiveChain: [GROK], reason: "capability_override" },
+		expected: { effectiveChain: DEFAULT_ROUTE, reason: "capability_override" },
 	},
 	{
 		id: "structural-provider-restrictions-kept",
@@ -161,7 +167,7 @@ export const ROUTING_GOLD_DATASET: RoutingGoldCase[] = [
 			},
 		},
 		semantic: X,
-		expected: { effectiveChain: [GROK], reason: "capability_override" },
+		expected: { effectiveChain: DEFAULT_ROUTE, reason: "capability_override" },
 	},
 	{
 		id: "structural-require-parameters-strengthened",
@@ -242,7 +248,7 @@ export const ROUTING_GOLD_DATASET: RoutingGoldCase[] = [
 		tags: ["chain", "override"],
 		request: { model: CLAUDE, models: [GPT], messages: X_QUESTION },
 		semantic: X,
-		expected: { effectiveChain: [GROK], reason: "capability_override" },
+		expected: { effectiveChain: DEFAULT_ROUTE, reason: "capability_override" },
 	},
 	{
 		id: "chain-wiped-override-false",
@@ -482,7 +488,7 @@ export const ROUTING_GOLD_DATASET: RoutingGoldCase[] = [
 			reasoning: { max_tokens: 1024 },
 		},
 		semantic: X,
-		expected: { effectiveChain: [GROK], reason: "capability_override" },
+		expected: { effectiveChain: DEFAULT_ROUTE, reason: "capability_override" },
 	},
 	{
 		id: "agent-loop-gpt-history-override-to-grok",
@@ -498,7 +504,7 @@ export const ROUTING_GOLD_DATASET: RoutingGoldCase[] = [
 			tools: [fn("save_note")],
 		},
 		semantic: X,
-		expected: { effectiveChain: [GROK], reason: "capability_override" },
+		expected: { effectiveChain: DEFAULT_ROUTE, reason: "capability_override" },
 	},
 	{
 		id: "agent-loop-grok-history-stays-on-grok",
@@ -527,5 +533,41 @@ export const ROUTING_GOLD_DATASET: RoutingGoldCase[] = [
 		},
 		semantic: {},
 		expected: { effectiveChain: [CLAUDE], reason: "requested_model" },
+	},
+
+	// --- configured default route (#24) ---
+	{
+		id: "default-route-config-drops-incompatible-candidates",
+		tags: ["default_route", "structural"],
+		request: { model: CLAUDE, messages: IMAGE_QUESTION },
+		semantic: X,
+		// grok-3 は X Search 非対応、text-only は image 非対応
+		defaultRouteModels: ["x-ai/grok-3", GROK_FALLBACK, TEXT_ONLY, GROK],
+		expected: {
+			effectiveChain: [GROK_FALLBACK, GROK],
+			reason: "capability_override",
+		},
+	},
+	{
+		id: "default-route-config-web-search-needs-tools",
+		tags: ["default_route", "tools"],
+		request: {
+			model: TEXT_ONLY,
+			messages: [{ role: "user", content: "今日のニュースを教えて" }],
+		},
+		semantic: { "web.search": 0.95 },
+		defaultRouteModels: [TEXT_ONLY, GROK_OLD, GROK],
+		expected: {
+			effectiveChain: [GROK_OLD, GROK],
+			reason: "capability_override",
+		},
+	},
+	{
+		id: "default-route-config-no-compatible-model",
+		tags: ["default_route"],
+		request: { model: CLAUDE, messages: X_QUESTION },
+		semantic: X,
+		defaultRouteModels: ["x-ai/grok-3", TEXT_ONLY],
+		expected: { error: "capability_not_supported" },
 	},
 ];

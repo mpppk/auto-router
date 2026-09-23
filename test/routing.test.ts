@@ -101,6 +101,7 @@ describe("capability-aware routing through the proxy", () => {
 		);
 		expect(forwarded).toEqual({
 			model: "x-ai/grok-4.7",
+			models: ["x-ai/grok-4.6"],
 			messages,
 			tools: [
 				{ type: "function", function: { name: "f", parameters: {} } },

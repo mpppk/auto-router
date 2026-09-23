@@ -122,6 +122,14 @@ auto-router 側の負担 (Worker の CPU / request、Jev 呼び出し、D1 書�
 - Jev が 401 (API key 拒否) を返した場合は degraded として続行せず、upstream も呼ばずに `401 invalid_api_key` を返します (trace は保存しない)。403 等の他のエラーは key の model 制限等でも起こるため、従来どおり degraded として扱います
 - upstream が 401 を返した場合は response をそのまま返しますが、trace は保存しません (`Auto-Router-Trace-Id` も付与しない)
 
+### Capability default route
+
+caller の model chain が全滅し override が許可されている場合、`web.search` / `social.x.search` は default route (Grok 4+ の fallback chain) に置換します。既定値は `x-ai/grok-4.7,x-ai/grok-4.6` で、Worker var `DEFAULT_ROUTE_MODELS` (`wrangler.jsonc` の `vars`) で TypeScript のコード変更なしに変更できます。
+
+- `,` 区切りで先頭が primary、以降は OpenRouter の model fallback (`models`)
+- 全候補を caller chain と同じく Hard Requirement で検証し、満たさない model (Grok 3 以前、image 非対応等) は chain から除外する。全候補が不可なら `capability_not_supported`
+- 空・空要素・空白を含む不正な値は warning を出して既定値を使う
+
 ### Agent loop (tool calling の途中での model override)
 
 semantic 判定は「最新の user message に答えるために何が必要か」で行い、Jev に渡す context は最新の user message までに限定します (それ以降の agent loop の経過 = assistant message / tool result は含めない)。そのため同じ user message に対する agent loop の各ターンで判定が変わらず、loop の途中で model が行き来しません。次の user message が来た時点で改めて判定し、X Search が不要になれば caller の model に戻ります。

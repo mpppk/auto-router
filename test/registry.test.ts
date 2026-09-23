@@ -5,7 +5,7 @@ import {
 } from "../src/catalog/model-catalog";
 import { SEMANTIC_CAPABILITIES } from "../src/core/capabilities";
 import {
-	DEFAULT_GROK_MODEL,
+	DEFAULT_GROK_MODELS,
 	isGrok4OrLater,
 	SEMANTIC_REGISTRY,
 	STRUCTURAL_REGISTRY,
@@ -45,8 +45,10 @@ describe("SEMANTIC_REGISTRY", () => {
 
 	test("social.x.search default route is a Grok 4+ model with native X search", () => {
 		const def = SEMANTIC_REGISTRY["social.x.search"];
-		expect(def.defaultRoute?.model).toBe(DEFAULT_GROK_MODEL);
-		expect(isGrok4OrLater(DEFAULT_GROK_MODEL)).toBe(true);
+		expect(def.defaultRoute?.models).toBe(DEFAULT_GROK_MODELS);
+		for (const model of DEFAULT_GROK_MODELS) {
+			expect(isGrok4OrLater(model)).toBe(true);
+		}
 		expect(def.serverTool?.type).toBe(WEB_SEARCH_TOOL_TYPE);
 		const { engine, x_search } = def.serverTool?.parameters ?? {};
 		expect(engine?.(undefined)).toEqual({ value: "native" });
@@ -66,7 +68,9 @@ describe("SEMANTIC_REGISTRY", () => {
 		);
 		expect(def.support("a", profile())).toBe("unsupported");
 		expect(def.support("a", undefined)).toBe("unknown");
-		expect(def.support(DEFAULT_GROK_MODEL, undefined)).toBe("supported");
+		expect(def.support(DEFAULT_GROK_MODELS[0] as string, undefined)).toBe(
+			"supported",
+		);
 	});
 
 	test.each([
@@ -78,7 +82,9 @@ describe("SEMANTIC_REGISTRY", () => {
 	] as const)("%s is unsupported in MVP", (capability) => {
 		const def = SEMANTIC_REGISTRY[capability];
 		expect(def.defaultRoute).toBeUndefined();
-		expect(def.support(DEFAULT_GROK_MODEL, profile())).toBe("unsupported");
+		expect(def.support(DEFAULT_GROK_MODELS[0] as string, profile())).toBe(
+			"unsupported",
+		);
 	});
 });
 

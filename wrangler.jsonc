@@ -6,6 +6,11 @@
 	"observability": {
 		"enabled": true
 	},
+	"vars": {
+		// capability default route (web.search / social.x.search)。`,` 区切りで先頭が primary、以降は fallback。
+		// 全候補を resolver が検証し、Hard Requirement を満たさない model は除外する (#24)。
+		"DEFAULT_ROUTE_MODELS": "x-ai/grok-4.7,x-ai/grok-4.6"
+	},
 	"d1_databases": [
 		{
 			// routing trace の保存先 (#7)

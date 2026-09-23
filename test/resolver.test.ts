@@ -11,6 +11,9 @@ const CLAUDE = "anthropic/claude-sonnet-5";
 const GPT = "openai/gpt-5";
 const GROK = "x-ai/grok-4.7";
 const GROK_OLD = "x-ai/grok-4.5";
+const GROK_FALLBACK = "x-ai/grok-4.6";
+/** registry の既定 default route。 */
+const DEFAULT_ROUTE = [GROK, GROK_FALLBACK];
 
 const catalog = createStaticModelCatalog([
 	...MODEL_PROFILES,
@@ -110,13 +113,56 @@ describe("resolveRoute with Hard Requirements", () => {
 	test("chain wiped out + override=true → default route only", () => {
 		const r = resolve([CLAUDE, GPT], [required("social.x.search")]);
 		expect(r.reason).toBe("capability_override");
-		expect(r.effectiveChain).toEqual([GROK]);
-		expect(r.plan?.modelChain).toEqual([GROK]);
-		expect(r.candidates.at(-1)).toMatchObject({
-			model: GROK,
-			origin: "default_route",
-			accepted: true,
+		expect(r.effectiveChain).toEqual(DEFAULT_ROUTE);
+		expect(r.plan?.modelChain).toEqual(DEFAULT_ROUTE);
+		expect(r.candidates.slice(-2)).toMatchObject([
+			{ model: GROK, origin: "default_route", accepted: true },
+			{ model: GROK_FALLBACK, origin: "default_route", accepted: true },
+		]);
+	});
+
+	test("configured default route: incompatible candidates are dropped from the chain", () => {
+		const r = resolveRoute({
+			requestedChain: [CLAUDE],
+			semanticRequirements: [required("social.x.search")],
+			semanticDegraded: false,
+			structural: detectStructuralRequirements({
+				contentParts: [{ type: "image_url", path: "messages[0].content[1]" }],
+			}),
+			features: {
+				contentParts: [{ type: "image_url", path: "messages[0].content[1]" }],
+			},
+			catalog,
+			allowModelOverride: true,
+			// grok-3 は X Search 非対応、text-only は image 非対応
+			defaultRouteModels: ["x-ai/grok-3", GROK_FALLBACK, "text/no-tools", GROK],
 		});
+		expect(r.reason).toBe("capability_override");
+		expect(r.effectiveChain).toEqual([GROK_FALLBACK, GROK]);
+		expect(
+			r.candidates
+				.filter((c) => c.origin === "default_route")
+				.map((c) => [c.model, c.accepted]),
+		).toEqual([
+			["x-ai/grok-3", false],
+			[GROK_FALLBACK, true],
+			["text/no-tools", false],
+			[GROK, true],
+		]);
+	});
+
+	test("configured default route with no compatible model → not supported", () => {
+		const r = resolveRoute({
+			requestedChain: [CLAUDE],
+			semanticRequirements: [required("social.x.search")],
+			semanticDegraded: false,
+			structural: detectStructuralRequirements({ contentParts: [] }),
+			features: { contentParts: [] },
+			catalog,
+			allowModelOverride: true,
+			defaultRouteModels: ["x-ai/grok-3"],
+		});
+		expect(r.error?.code).toBe("capability_not_supported");
 	});
 
 	test("chain wiped out + override=false → capability_not_supported", () => {
@@ -148,7 +194,7 @@ describe("resolveRoute with Hard Requirements", () => {
 				contentParts: [{ type: "image_url", path: "messages[0].content[1]" }],
 			},
 		});
-		expect(r.effectiveChain).toEqual([GROK]);
+		expect(r.effectiveChain).toEqual(DEFAULT_ROUTE);
 		expect(r.hardRequirements.map((h) => h.capability)).toEqual([
 			"social.x.search",
 			"input.image",
@@ -216,13 +262,13 @@ describe("resolveRoute with Hard Requirements", () => {
 				tools: [{ type: "function", function: { name: "f" } }],
 			},
 		});
-		expect(r.effectiveChain).toEqual([GROK]);
+		expect(r.effectiveChain).toEqual(DEFAULT_ROUTE);
 		expect(r.plan?.provider).toEqual({ ...provider, require_parameters: true });
 	});
 
 	test("no model specified: semantic requirement → default route", () => {
 		const r = resolve([], [required("social.x.search")]);
-		expect(r.effectiveChain).toEqual([GROK]);
+		expect(r.effectiveChain).toEqual(DEFAULT_ROUTE);
 		expect(r.reason).toBe("capability_override");
 	});
 

@@ -24,6 +24,7 @@ import {
 	CLAUDE,
 	GPT,
 	GROK,
+	GROK_FALLBACK,
 	GROK_OLD,
 	ROUTING_GOLD_DATASET,
 	type RoutingGoldCase,
@@ -42,6 +43,11 @@ const FULL_PARAMS = [
 export const EVAL_MODEL_PROFILES: ModelProfile[] = [
 	{
 		id: GROK,
+		inputModalities: ["text", "image", "file"],
+		supportedParameters: FULL_PARAMS,
+	},
+	{
+		id: GROK_FALLBACK,
 		inputModalities: ["text", "image", "file"],
 		supportedParameters: FULL_PARAMS,
 	},
@@ -318,6 +324,9 @@ export const runRoutingEval = async (
 			detector: options.live?.detector ?? fixedDetector(c.semantic, thresholds),
 			catalog: { load: async () => catalog },
 			traceStore,
+			...(c.defaultRouteModels
+				? { defaultRouteModels: c.defaultRouteModels }
+				: {}),
 		});
 		const apiKey = options.live?.apiKey ?? API_KEY;
 		const res = await app.request("/api/v1/chat/completions", {

@@ -76,6 +76,18 @@ export const MODEL_PROFILES: ModelProfile[] = [
 		],
 	},
 	{
+		// default route の fallback (DEFAULT_GROK_MODELS)
+		id: "x-ai/grok-4.6",
+		inputModalities: ["text", "image", "file"],
+		supportedParameters: [
+			"tools",
+			"tool_choice",
+			"structured_outputs",
+			"response_format",
+			"reasoning",
+		],
+	},
+	{
 		id: "anthropic/claude-sonnet-5",
 		inputModalities: ["text", "image", "file"],
 		supportedParameters: [

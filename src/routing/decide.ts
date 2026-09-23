@@ -13,6 +13,8 @@ import type { SemanticDetection, SemanticDetector } from "../semantic/detector";
 export interface RoutingDeps {
 	detector: SemanticDetector;
 	catalog: ModelCatalogSource;
+	/** capability default route の上書き。未指定なら registry の既定値。 */
+	defaultRouteModels?: readonly string[];
 	now?: () => number;
 }
 
@@ -73,6 +75,9 @@ export const decideRoute = async (
 		features: input.context.features,
 		catalog,
 		allowModelOverride: input.allowModelOverride,
+		...(deps.defaultRouteModels
+			? { defaultRouteModels: deps.defaultRouteModels }
+			: {}),
 	});
 
 	return {
