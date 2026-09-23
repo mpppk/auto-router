@@ -5,6 +5,7 @@
  *   bun run eval:routing --threshold social.x.search=0.95 # threshold を変えて比較
  *   bun run eval:routing --live                           # semantic 判定に実 Jev を使う (要 OPENROUTER_API_KEY)
  *   bun run eval:routing --json report.json
+ *   bun run eval:routing --live --strict                  # 期待値の不一致でも失敗 (定期実行用)
  *
  * Hard Requirement violation / incompatible fallback leakage / caller tool preservation failure が
  * 1件でもあれば exit code 1。
@@ -22,6 +23,8 @@ const { values } = parseArgs({
 	options: {
 		threshold: { type: "string", multiple: true, default: [] },
 		live: { type: "boolean", default: false },
+		/** 期待値 (effective chain / route reason / error) の不一致でも exit 1 にする。 */
+		strict: { type: "boolean", default: false },
 		json: { type: "string" },
 	},
 });
@@ -91,7 +94,8 @@ if (values.json) {
 if (
 	m.hardRequirementViolations > 0 ||
 	m.incompatibleFallbackLeakage > 0 ||
-	m.callerToolPreservationFailures > 0
+	m.callerToolPreservationFailures > 0 ||
+	(values.strict && m.expectationPassed < m.cases)
 ) {
 	process.exit(1);
 }

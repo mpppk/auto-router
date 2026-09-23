@@ -630,4 +630,90 @@ export const ROUTING_GOLD_DATASET: RoutingGoldCase[] = [
 		},
 		expected: { error: "capability_not_supported" },
 	},
+
+	// --- 複数 structural requirement の組み合わせ (#27) ---
+	{
+		id: "combo-image-json-schema-x-search",
+		tags: ["structural", "combo"],
+		request: {
+			model: CLAUDE,
+			models: [TEXT_ONLY],
+			messages: IMAGE_QUESTION,
+			response_format: {
+				type: "json_schema",
+				json_schema: { name: "r", schema: { type: "object" } },
+			},
+		},
+		semantic: X,
+		expected: { effectiveChain: DEFAULT_ROUTE, reason: "capability_override" },
+	},
+	{
+		id: "combo-audio-x-search-not-supported",
+		tags: ["structural", "combo"],
+		request: {
+			model: CLAUDE,
+			messages: [
+				{
+					role: "user",
+					content: [
+						{
+							type: "text",
+							text: "この音声で紹介している製品について、Xでの反応を調べて",
+						},
+						{
+							type: "input_audio",
+							input_audio: { data: "AAAA", format: "wav" },
+						},
+					],
+				},
+			],
+		},
+		semantic: X,
+		expected: { error: "capability_not_supported" },
+	},
+	{
+		id: "combo-file-web-search-tool-injection",
+		tags: ["structural", "combo", "tools"],
+		request: {
+			model: CLAUDE,
+			messages: [
+				{
+					role: "user",
+					content: [
+						{
+							type: "text",
+							text: "このPDFに載っている製品の今日の最新価格をWebで調べて",
+						},
+						{
+							type: "file",
+							file: {
+								filename: "a.pdf",
+								file_data: "data:application/pdf;base64,AAAA",
+							},
+						},
+					],
+				},
+			],
+		},
+		semantic: { "web.search": 0.95 },
+		expected: { effectiveChain: [CLAUDE], reason: "requested_model" },
+	},
+	{
+		id: "combo-reasoning-tools-web-search-filters-text-only",
+		tags: ["structural", "combo", "tools"],
+		request: {
+			model: TEXT_ONLY,
+			models: [CLAUDE, GPT],
+			messages: [
+				{ role: "user", content: "今日の日経平均の終値を調べてメモして" },
+			],
+			tools: [fn("save_note")],
+			reasoning: { effort: "low" },
+		},
+		semantic: { "web.search": 0.95 },
+		expected: {
+			effectiveChain: [CLAUDE, GPT],
+			reason: "filtered_fallback_chain",
+		},
+	},
 ];

@@ -1,0 +1,65 @@
+name: Eval
+
+# 実 Jev (`~typesafe/jev-latest`) を使う eval を定期実行する (#27)。
+# Jev は alias のため upstream の model 更新で判定傾向が変わりうる。指標が閾値を下回ったら failure にする
+# (scheduled workflow の failure は GitHub から通知される)。結果は artifact に保存して推移を追う。
+on:
+  schedule:
+    - cron: "23 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval
+  cancel-in-progress: false
+
+jobs:
+  live-eval:
+    name: Live Jev eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - name: Semantic detector eval
+        id: semantic
+        run: |
+          set -o pipefail
+          bun run eval:semantic --min-precision 0.9 --min-recall 0.7 --json eval-semantic.json | tee eval-semantic.txt
+      - name: Routing eval (live)
+        id: routing
+        if: always() && steps.semantic.outcome != 'skipped'
+        run: |
+          set -o pipefail
+          bun run eval:routing --live --strict --json eval-routing.json | tee eval-routing.txt
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Semantic detector eval (${{ steps.semantic.outcome }})"
+            echo '```'
+            cat eval-semantic.txt 2>/dev/null || echo "(no output)"
+            echo '```'
+            echo "## Routing eval --live (${{ steps.routing.outcome }})"
+            echo '```'
+            tail -n 8 eval-routing.txt 2>/dev/null || echo "(no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: eval-${{ github.run_number }}
+          path: |
+            eval-semantic.json
+            eval-semantic.txt
+            eval-routing.json
+            eval-routing.txt
+          if-no-files-found: ignore
+          retention-days: 90

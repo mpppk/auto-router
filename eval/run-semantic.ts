@@ -6,6 +6,7 @@
  *   bun run eval:semantic --threshold social.x.search=0.7,0.2
  *   bun run eval:semantic --sweep              # required threshold を変えて比較
  *   bun run eval:semantic --json report.json
+ *   bun run eval:semantic --min-precision 0.9 --min-recall 0.7   # 下回る capability があれば exit 1
  *
  * OPENROUTER_API_KEY が必要 (.env から Bun が自動で読み込む)。
  */
@@ -39,6 +40,8 @@ const { values } = parseArgs({
 		threshold: { type: "string", multiple: true, default: [] },
 		json: { type: "string" },
 		concurrency: { type: "string", default: "4" },
+		"min-precision": { type: "string" },
+		"min-recall": { type: "string" },
 	},
 });
 
@@ -200,4 +203,27 @@ if (values.json) {
 		values.json,
 		`${JSON.stringify({ thresholds, reports, observations }, null, "\t")}\n`,
 	);
+}
+
+// 定期実行 (#27) 用の gate。Jev model (alias) の更新で判定傾向が変わったら失敗させる。
+const minPrecision =
+	values["min-precision"] === undefined
+		? undefined
+		: Number(values["min-precision"]);
+const minRecall =
+	values["min-recall"] === undefined ? undefined : Number(values["min-recall"]);
+const gateFailures = reports.flatMap((r) => [
+	...(minPrecision !== undefined &&
+	!Number.isNaN(r.precision) &&
+	r.precision < minPrecision
+		? [`${r.capability} precision ${formatRate(r.precision)} < ${minPrecision}`]
+		: []),
+	...(minRecall !== undefined && !Number.isNaN(r.recall) && r.recall < minRecall
+		? [`${r.capability} recall ${formatRate(r.recall)} < ${minRecall}`]
+		: []),
+]);
+if (gateFailures.length > 0) {
+	console.log("\ngate failures:");
+	for (const f of gateFailures) console.log(`  ${f}`);
+	process.exit(1);
 }

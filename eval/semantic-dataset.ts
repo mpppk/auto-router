@@ -338,4 +338,167 @@ export const SEMANTIC_GOLD_DATASET: SemanticGoldCase[] = [
 		],
 		expected: { "web.search": false, "social.x.search": false },
 	},
+
+	// --- English / 日英混在 (#27) ---
+	{
+		id: "en-x-pos-twitter-opinion",
+		tags: ["x", "en"],
+		conversation: [
+			user("Can you check what people on Twitter think about the new Pixel?"),
+		],
+		expected: { "social.x.search": true },
+	},
+	{
+		id: "en-x-neg-draft-tweet",
+		tags: ["x", "en", "mention_only"],
+		conversation: [
+			user("Draft a tweet announcing our product launch next Monday."),
+		],
+		expected: { "social.x.search": false, "web.search": false },
+	},
+	{
+		id: "en-web-pos-bitcoin-price",
+		tags: ["web", "en"],
+		conversation: [user("What's the current price of Bitcoin?")],
+		expected: { "web.search": true, "social.x.search": false },
+	},
+	{
+		id: "en-web-neg-hash-map",
+		tags: ["web", "en"],
+		conversation: [user("Explain how a hash map handles collisions.")],
+		expected: { "web.search": false, "social.x.search": false },
+	},
+	{
+		id: "mixed-x-pos-reaction",
+		tags: ["x", "mixed"],
+		conversation: [
+			user("Claude Codeのnew releaseについてXでのreactionをまとめて"),
+		],
+		expected: { "social.x.search": true },
+	},
+	{
+		id: "mixed-web-pos-node-lts",
+		tags: ["web", "mixed"],
+		conversation: [user("latest Node.js LTS のバージョンは？")],
+		expected: { "web.search": true, "social.x.search": false },
+	},
+	{
+		id: "en-places-pos-sushi-near",
+		tags: ["places", "en"],
+		conversation: [user("Find a good sushi place near Shinjuku station.")],
+		expected: {
+			"places.search": true,
+			"geo.proximity": true,
+			"source.google_maps": false,
+		},
+	},
+	{
+		id: "en-places-neg-sushi-history",
+		tags: ["places", "en"],
+		conversation: [user("What is the history of sushi?")],
+		expected: {
+			"places.search": false,
+			"geo.proximity": false,
+			"web.search": false,
+		},
+	},
+
+	// --- 曖昧なケース (#27) ---
+	{
+		id: "ambiguous-recent-iphone",
+		tags: ["ambiguous", "web"],
+		conversation: [user("最近のiPhoneってどう？")],
+		expected: { "web.search": true, "social.x.search": false },
+	},
+	{
+		id: "ambiguous-trending-ai-tools",
+		tags: ["ambiguous", "web"],
+		conversation: [user("話題の生成AIツールって何がある？")],
+		expected: { "web.search": true, "social.x.search": false },
+	},
+	{
+		id: "ambiguous-generic-advice",
+		tags: ["ambiguous", "web"],
+		conversation: [user("最近疲れやすいんだけど、どうしたらいい？")],
+		expected: { "web.search": false, "social.x.search": false },
+	},
+
+	// --- 長い会話: 12 件の窓の境界 (#27) ---
+	{
+		id: "long-x-continuation-at-window-start",
+		tags: ["conversation", "long", "continuation", "x"],
+		conversation: [
+			// 窓 (直近 12 件) の先頭に X 検索の依頼が入る
+			...X_SEARCH_TURN,
+			user("料金への不満はどんな内容？"),
+			assistant("主に使用量制限と月額料金に関する投稿です。"),
+			user("好意的な投稿はどれくらい？"),
+			assistant("検索結果の約6割が好意的でした。"),
+			user("比較されていたツールは？"),
+			assistant("Cursor や Copilot との比較が多く見られました。"),
+			user("Cursor との比較で多かった意見は？"),
+			assistant(
+				"補完の速さは Cursor、自律的な作業は Claude Code という意見です。",
+			),
+			user("じゃあ Cursor についても同じように X の反応を調べて"),
+		],
+		expected: { "social.x.search": true },
+	},
+	{
+		id: "long-x-request-outside-window",
+		tags: ["conversation", "long", "topic_shift", "x"],
+		conversation: [
+			...X_SEARCH_TURN,
+			user("ありがとう。ところで Rust の所有権を説明して"),
+			assistant("Rust では各値に所有者が1つあり..."),
+			user("借用との違いは？"),
+			assistant("借用は所有権を移さずに参照する仕組みで..."),
+			user("ライフタイムは？"),
+			assistant("ライフタイムは参照が有効な範囲を表し..."),
+			user("例を書いて"),
+			assistant("fn longest<'a>(x: &'a str, y: &'a str) -> &'a str { ... }"),
+			user("'static の意味は？"),
+			assistant("'static はプログラム全体の間有効な参照です。"),
+			user(
+				'じゃあこのコードのコンパイルエラーを直して: fn f() -> &str { "a" }',
+			),
+		],
+		expected: { "social.x.search": false, "web.search": false },
+	},
+
+	// --- system prompt で検索を指示 / 禁止 (#27) ---
+	{
+		id: "system-forbids-search",
+		tags: ["system", "explicit_no_search", "web"],
+		instructions: [
+			"You must never search the web or use external tools. Answer only from your own knowledge and say so if you are unsure.",
+		],
+		conversation: [user("今日の東京の天気は？")],
+		expected: { "web.search": false },
+	},
+	{
+		id: "system-forbids-x",
+		tags: ["system", "explicit_no_search", "x"],
+		instructions: ["Do not search X (Twitter) under any circumstances."],
+		conversation: [user("Xで今Claude Codeについてどんな反応がありますか？")],
+		expected: { "social.x.search": false },
+	},
+	{
+		id: "system-x-analyst",
+		tags: ["system", "x"],
+		instructions: [
+			"You are a social media analyst. You monitor posts on X (Twitter) and report current reactions.",
+		],
+		conversation: [user("今日発表された新しい Gemini への反応をまとめて")],
+		expected: { "social.x.search": true },
+	},
+	{
+		id: "system-always-verify-with-search",
+		tags: ["system", "web"],
+		instructions: [
+			"Always search the web to verify facts and cite sources before answering any factual question.",
+		],
+		conversation: [user("日本で一番高い山の標高は？")],
+		expected: { "web.search": true, "social.x.search": false },
+	},
 ];
