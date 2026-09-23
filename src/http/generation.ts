@@ -1,4 +1,7 @@
 import { chatCompletionsAdapter } from "../adapters/chat-completions";
+import type { EndpointAdapter } from "../adapters/endpoint-adapter";
+import { messagesAdapter } from "../adapters/messages";
+import { responsesAdapter } from "../adapters/responses";
 import { RouterError } from "../core/errors";
 import type { EffectiveRoutePlan } from "../core/types";
 import { decideRoute, type RoutingDeps } from "../routing/decide";
@@ -13,7 +16,7 @@ import {
 } from "../trace/trace";
 import {
 	forwardToOpenRouter,
-	getBearerToken,
+	getApiKey,
 	toClientResponse,
 	type UpstreamConfig,
 } from "../upstream/openrouter";
@@ -27,10 +30,44 @@ export interface TraceDeps {
 	waitUntil?: (promise: Promise<unknown>) => void;
 }
 
-export interface ChatCompletionsDeps extends RoutingDeps {
+export interface GenerationDeps extends RoutingDeps {
 	upstream: UpstreamConfig;
 	trace: TraceDeps;
 }
+
+/** capability-aware routing を行う generation endpoint。 */
+export interface GenerationEndpoint<TRequest> {
+	name: "chat_completions" | "responses" | "messages";
+	/** OpenRouter 側の path (`/chat/completions` 等)。 */
+	upstreamPath: string;
+	adapter: EndpointAdapter<TRequest>;
+}
+
+export const CHAT_COMPLETIONS_ENDPOINT = {
+	name: "chat_completions",
+	upstreamPath: "/chat/completions",
+	adapter: chatCompletionsAdapter,
+} as const satisfies GenerationEndpoint<unknown>;
+
+/** OpenAI Responses API 互換 (#30)。 */
+export const RESPONSES_ENDPOINT = {
+	name: "responses",
+	upstreamPath: "/responses",
+	adapter: responsesAdapter,
+} as const satisfies GenerationEndpoint<unknown>;
+
+/** Anthropic Messages API 互換 (#30)。 */
+export const MESSAGES_ENDPOINT = {
+	name: "messages",
+	upstreamPath: "/messages",
+	adapter: messagesAdapter,
+} as const satisfies GenerationEndpoint<unknown>;
+
+export const GENERATION_ENDPOINTS = [
+	CHAT_COMPLETIONS_ENDPOINT,
+	RESPONSES_ENDPOINT,
+	MESSAGES_ENDPOINT,
+] as const;
 
 const readJson = async (
 	request: Request,
@@ -55,21 +92,23 @@ const isUnchanged = (plan: EffectiveRoutePlan, requested: readonly string[]) =>
 	plan.modelChain.every((m, i) => m === requested[i]);
 
 export const requireApiKey = (headers: Headers): string => {
-	const apiKey = getBearerToken(headers);
+	const apiKey = getApiKey(headers);
 	if (apiKey === undefined) {
 		throw new RouterError(
 			"missing_authorization",
-			"`Authorization: Bearer <OpenRouter API key>` header is required.",
+			"`Authorization: Bearer <OpenRouter API key>` (or `x-api-key`) header is required.",
 		);
 	}
 	return apiKey;
 };
 
-/** Chat Completions 互換 request を parse し、routing 判断に必要な情報を揃える。 */
-export const prepareChatCompletions = async (request: Request) => {
+/** endpoint 固有形式の request を parse し、routing 判断に必要な情報を揃える。 */
+export const prepareRequest = async <TRequest>(
+	request: Request,
+	adapter: EndpointAdapter<TRequest>,
+) => {
 	const apiKey = requireApiKey(request.headers);
 	const options = parseRouterOptions(request.headers);
-	const adapter = chatCompletionsAdapter;
 	const { raw, json } = await readJson(request);
 	const parsed = adapter.parseRequest(json);
 	return {
@@ -101,14 +140,16 @@ const persistTrace = (deps: TraceDeps, trace: RoutingTrace, apiKey: string) => {
 };
 
 /**
- * `POST /api/v1/chat/completions` (と `/v1/chat/completions`) の handler。
+ * `POST /api/v1/chat/completions` / `/responses` / `/messages` (と `/v1/*`) の handler。
+ * endpoint 固有形式は adapter が吸収し、routing core は共通。
  * Hono の Context には依存せず、Web Standard の Request / Response で完結させる。
  */
-export const handleChatCompletions = async (
+export const handleGeneration = async <TRequest>(
 	request: Request,
-	deps: ChatCompletionsDeps,
+	deps: GenerationDeps,
+	endpoint: GenerationEndpoint<TRequest>,
 ): Promise<Response> => {
-	const prepared = await prepareChatCompletions(request);
+	const prepared = await prepareRequest(request, endpoint.adapter);
 	const { adapter, parsed, requestedChain } = prepared;
 
 	const decision = await decideRoute(
@@ -133,7 +174,7 @@ export const handleChatCompletions = async (
 	if (resolution.error !== undefined || resolution.plan === undefined) {
 		logRouterEvent({
 			event: "routing_decision",
-			...routingDecisionLog(trace, { endpoint: "chat_completions" }),
+			...routingDecisionLog(trace, { endpoint: endpoint.name }),
 		});
 		await persistTrace(deps.trace, trace, prepared.apiKey);
 		const error =
@@ -150,7 +191,7 @@ export const handleChatCompletions = async (
 	const started = Date.now();
 	const upstream = await forwardToOpenRouter(
 		deps.upstream,
-		"/chat/completions",
+		endpoint.upstreamPath,
 		body,
 		request.headers,
 		request.signal,
@@ -159,7 +200,7 @@ export const handleChatCompletions = async (
 	logRouterEvent({
 		event: "routing_decision",
 		...routingDecisionLog(trace, {
-			endpoint: "chat_completions",
+			endpoint: endpoint.name,
 			upstreamStatus: upstream.status,
 		}),
 	});

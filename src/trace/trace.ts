@@ -146,9 +146,22 @@ export const billableServerTools = (input: {
 
 export const summarizeTool = (tool: unknown): ToolSummary => {
 	if (!isRecord(tool)) return { type: "unknown" };
-	const type = typeof tool.type === "string" ? tool.type : "unknown";
+	// Anthropic Messages の client tool は type を持たない。
+	const type =
+		typeof tool.type === "string"
+			? tool.type
+			: isRecord(tool.input_schema)
+				? "custom"
+				: "unknown";
 	const fn = isRecord(tool.function) ? tool.function : undefined;
-	return typeof fn?.name === "string" ? { type, name: fn.name } : { type };
+	// Chat Completions は function.name、Responses / Messages は top-level の name。
+	const name =
+		typeof fn?.name === "string"
+			? fn.name
+			: type !== "unknown" && typeof tool.name === "string"
+				? tool.name
+				: undefined;
+	return name !== undefined ? { type, name } : { type };
 };
 
 /** `rt_` + 32 hex。 */

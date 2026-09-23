@@ -5,20 +5,40 @@ import { summaryHeaders } from "../trace/headers";
 import { logRouterEvent, routingDecisionLog } from "../trace/log";
 import { buildRoutingTrace, newTraceId } from "../trace/trace";
 import {
-	prepareChatCompletions,
+	CHAT_COMPLETIONS_ENDPOINT,
+	GENERATION_ENDPOINTS,
+	type GenerationEndpoint,
+	prepareRequest,
 	requireApiKey,
 	type TraceDeps,
-} from "./chat-completions";
+} from "./generation";
+
+/** `?endpoint=` query から inspect 対象の endpoint 形式を選ぶ (既定は chat_completions)。 */
+export const inspectEndpoint = (
+	name: string | undefined,
+): GenerationEndpoint<unknown> => {
+	if (name === undefined) return CHAT_COMPLETIONS_ENDPOINT;
+	const endpoint = GENERATION_ENDPOINTS.find((e) => e.name === name);
+	if (endpoint === undefined) {
+		throw new RouterError(
+			"invalid_router_request",
+			`Query \`endpoint\` must be one of ${GENERATION_ENDPOINTS.map((e) => e.name).join(", ")}.`,
+			{ param: "endpoint" },
+		);
+	}
+	return endpoint as GenerationEndpoint<unknown>;
+};
 
 /**
- * `POST /api/v1/auto-router/inspect`
- * Chat Completions 互換 request の routing decision を返す。upstream LLM は呼ばない。
+ * `POST /api/v1/auto-router/inspect[?endpoint=chat_completions|responses|messages]`
+ * 同じ形式の request の routing decision を返す。upstream LLM は呼ばない。
  */
 export const handleInspect = async (
 	request: Request,
 	deps: RoutingDeps,
+	endpoint: GenerationEndpoint<unknown> = CHAT_COMPLETIONS_ENDPOINT,
 ): Promise<Response> => {
-	const prepared = await prepareChatCompletions(request);
+	const prepared = await prepareRequest(request, endpoint.adapter);
 	const decision = await decideRoute(
 		{
 			context: prepared.context,
@@ -50,7 +70,7 @@ export const handleInspect = async (
 					const patched = prepared.adapter.applyRoutePlan(
 						prepared.parsed,
 						resolution.plan,
-					);
+					) as Record<string, unknown>;
 					return {
 						model: patched.model,
 						models: patched.models,

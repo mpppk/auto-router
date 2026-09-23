@@ -1,7 +1,7 @@
 import { RouterError } from "../core/errors";
 import { apiKeyFingerprint } from "../trace/fingerprint";
 import { logRouterEvent } from "../trace/log";
-import { getBearerToken } from "../upstream/openrouter";
+import { getApiKey } from "../upstream/openrouter";
 
 /** Workers Rate Limiting binding の必要部分。 */
 export interface RateLimiter {
@@ -40,7 +40,7 @@ export const enforceRateLimit = async (
 	deps: RateLimitDeps,
 ): Promise<void> => {
 	const ip = request.headers.get("cf-connecting-ip");
-	const apiKey = getBearerToken(request.headers);
+	const apiKey = getApiKey(request.headers);
 	const [ipOutcome, keyOutcome] = await Promise.all([
 		deps.ip && ip ? deps.ip.limit({ key: `ip:${ip}` }) : undefined,
 		deps.key && apiKey !== undefined

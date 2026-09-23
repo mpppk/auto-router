@@ -115,6 +115,37 @@ const results = [
 		return trace.reason;
 	}),
 
+	// Responses / Messages adapter (#30)。x-api-key 認証も確認する。
+	await check(
+		"POST /api/v1/auto-router/inspect?endpoint=messages",
+		async () => {
+			const res = await fetch(
+				`${baseUrl}/api/v1/auto-router/inspect?endpoint=messages`,
+				{
+					method: "POST",
+					headers: { "x-api-key": apiKey, "content-type": "application/json" },
+					body: JSON.stringify({
+						model: "anthropic/claude-sonnet-5",
+						max_tokens: 16,
+						messages: [
+							{
+								role: "user",
+								content: "Xで今Claude Codeについてどんな反応がありますか？",
+							},
+						],
+					}),
+				},
+			);
+			await expectOk(res, "inspect messages");
+			const { trace } = (await res.json()) as { trace: { reason: string } };
+			assert(
+				trace.reason === "capability_override",
+				`unexpected route reason ${trace.reason}`,
+			);
+			return trace.reason;
+		},
+	),
+
 	// upstream proxy と D1 への trace 書き込み (waitUntil)・読み出し。
 	await check("POST /api/v1/chat/completions + GET trace (D1)", async () => {
 		const res = await fetch(`${baseUrl}/api/v1/chat/completions`, {
