@@ -22,6 +22,8 @@ import {
 } from "./trace/store";
 import {
 	DEFAULT_OPENROUTER_BASE_URL,
+	forwardGetToOpenRouter,
+	toClientResponse,
 	type UpstreamConfig,
 } from "./upstream/openrouter";
 
@@ -142,11 +144,23 @@ export const createApp = (deps: AppDeps = {}) => {
 				trace: traceDeps(c),
 			}),
 		);
+		// model 一覧は generation endpoint ではないため OpenRouter の response をそのまま返す (#23)。
+		// OpenAI 互換 client が接続確認・model 選択 UI で `GET {baseURL}/models` を呼ぶ。
+		app.get(`${prefix}/models`, async (c) => {
+			const upstreamRes = await forwardGetToOpenRouter(
+				upstream,
+				"/models",
+				new URL(c.req.url).search,
+				c.req.raw.headers,
+				c.req.raw.signal,
+			);
+			return toClientResponse(upstreamRes);
+		});
 		// 未対応の endpoint は黙って proxy せず明示的にエラーにする。
 		app.all(`${prefix}/*`, (c) => {
 			throw new RouterError(
 				"unsupported_endpoint",
-				`auto-router does not support ${c.req.method} ${c.req.path}. Supported: POST ${prefix}/chat/completions`,
+				`auto-router does not support ${c.req.method} ${c.req.path}. Supported: POST ${prefix}/chat/completions, GET ${prefix}/models`,
 				{ method: c.req.method, path: c.req.path },
 			);
 		});

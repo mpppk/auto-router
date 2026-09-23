@@ -57,6 +57,9 @@ OpenAI / OpenRouter 互換の base URL として `https://<host>/api/v1` を指�
 | `POST /api/v1/chat/completions` (`/v1/chat/completions`) | capability-aware routing 付き Chat Completions proxy |
 | `POST /api/v1/auto-router/inspect` | 同じ request の routing decision を返す。upstream model は呼ばない |
 | `GET /api/v1/auto-router/traces/:traceId` | 実行済み routing trace を返す (同じ API key からのみ取得可) |
+| `GET /api/v1/models` (`/v1/models`) | OpenRouter `GET /models` をそのまま透過 (query string / Authorization も透過)。OpenAI 互換 client の接続確認・model 選択 UI 用 |
+
+上記以外の endpoint (`/responses`、`/completions`、`/embeddings` 等の generation endpoint を含む) は黙って proxy せず `unsupported_endpoint` (404) を返します。
 
 ### Request headers
 

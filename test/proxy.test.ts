@@ -158,6 +158,64 @@ describe("POST /api/v1/chat/completions", () => {
 	});
 });
 
+const MODELS_BODY =
+	'{"data":[{"id":"openai/gpt-5","object":"model","created":0,"owned_by":"openai","extra":{"kept":true}}]}';
+
+describe("GET /models", () => {
+	test.each(["/api/v1/models", "/v1/models"])(
+		"%s forwards to OpenRouter /models as-is",
+		async (path) => {
+			const { app, upstream, detector, traceStore } = createTestApp({
+				respond: () =>
+					new Response(MODELS_BODY, {
+						headers: {
+							"content-type": "application/json",
+							"set-cookie": "a=b",
+							"x-upstream": "1",
+						},
+					}),
+			});
+
+			const res = await app.request(`${path}?supported_parameters=tools`, {
+				headers: {
+					authorization: "Bearer sk-or-test",
+					"Auto-Router-Debug": "true",
+				},
+			});
+
+			expect(res.status).toBe(200);
+			expect(await res.text()).toBe(MODELS_BODY);
+			expect(res.headers.get("x-upstream")).toBe("1");
+			expect(res.headers.get("set-cookie")).toBeNull();
+			const req = upstream.requests[0];
+			expect(req?.method).toBe("GET");
+			expect(req?.url).toBe(`${BASE}/models?supported_parameters=tools`);
+			expect(req?.headers.get("authorization")).toBe("Bearer sk-or-test");
+			expect(req?.headers.get("auto-router-debug")).toBeNull();
+			expect(req?.headers.get("content-type")).toBeNull();
+			// routing は行わない
+			expect(detector.calls).toBe(0);
+			expect(traceStore.size()).toBe(0);
+		},
+	);
+
+	test("works without Authorization", async () => {
+		const { app, upstream } = createTestApp({
+			respond: () => new Response(MODELS_BODY),
+		});
+		const res = await app.request("/api/v1/models");
+		expect(res.status).toBe(200);
+		expect(upstream.requests[0]?.headers.get("authorization")).toBeNull();
+	});
+
+	test("forwards upstream errors with their status", async () => {
+		const { app } = createTestApp({
+			respond: () => Response.json({ error: { code: 503 } }, { status: 503 }),
+		});
+		expect((await app.request("/v1/models")).status).toBe(503);
+	});
+});
+
 describe("unsupported endpoints", () => {
 	test.each([
 		["POST", "/api/v1/responses"],
@@ -165,6 +223,8 @@ describe("unsupported endpoints", () => {
 		["POST", "/v1/completions"],
 		["POST", "/v1/embeddings"],
 		["GET", "/api/v1/chat/completions"],
+		["POST", "/api/v1/models"],
+		["GET", "/api/v1/models/openai/gpt-5/endpoints"],
 	])("%s %s returns unsupported_endpoint", async (method, path) => {
 		const { app, upstream } = createTestApp();
 
@@ -241,6 +301,20 @@ describe("OpenAI SDK compatibility", () => {
 			model: "openai/gpt-5",
 			temperature: 0.2,
 		});
+	});
+
+	test("models.list works", async () => {
+		const { app } = createTestApp({
+			respond: () =>
+				new Response(MODELS_BODY, {
+					headers: { "content-type": "application/json" },
+				}),
+		});
+		const models = [];
+		for await (const model of createClient(app).models.list()) {
+			models.push(model.id);
+		}
+		expect(models).toEqual(["openai/gpt-5"]);
 	});
 
 	test("streaming works", async () => {
