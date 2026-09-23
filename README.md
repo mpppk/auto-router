@@ -219,9 +219,16 @@ threshold は暫定の `required: p >= 0.8` / `not_required: p <= 0.2` を維持
 `.github/workflows/ci.yml`
 
 - PR / `main` への push: lint, 型チェック, テスト, バンドル検証
-- `main` への push: 上記成功後に Cloudflare Workers へデプロイ (GitHub Environment `production`)
+- `main` への push: 上記成功後に Cloudflare Workers へデプロイ (GitHub Environment `production`) し、本番 endpoint に smoke test (`bun run smoke`) を実行。失敗すれば CI は failure
+  - `GET /health`、`GET /api/v1/models`、inspect (Jev・KV の model catalog)、安価な model (`openai/gpt-5-nano`, `max_tokens: 16`) での chat completion と D1 trace の書き込み・読み出し、unsupported endpoint
+  - ローカルからは `SMOKE_BASE_URL=https://auto-router.<subdomain>.workers.dev bun run smoke` (要 `OPENROUTER_API_KEY`)
 
 デプロイには以下の GitHub Secrets が必要です。
 
 - `CLOUDFLARE_API_TOKEN` — "Edit Cloudflare Workers" テンプレートで作成した API Token (D1 migration のため D1 Edit 権限も必要)
 - `CLOUDFLARE_ACCOUNT_ID`
+- `OPENROUTER_API_KEY` — smoke test / 定期 eval 用の OpenRouter key (1回あたり数円未満の課金。利用上限を設定した専用 key を推奨)
+
+GitHub Variables:
+
+- `SMOKE_BASE_URL` — smoke test の対象 URL (deploy step が URL を出力しない場合の fallback)
