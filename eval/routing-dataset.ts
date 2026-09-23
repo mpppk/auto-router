@@ -16,6 +16,8 @@ export interface RoutingGoldCase {
 		| Partial<Record<Capability, number>>
 		| { degraded: JevFailureReason };
 	allowModelOverride?: boolean;
+	/** `Auto-Router-*` 等の追加 request header。 */
+	headers?: Record<string, string>;
 	expected:
 		| { effectiveChain: string[]; reason: RouteReason }
 		| { error: RouterErrorCode };
@@ -370,5 +372,44 @@ export const ROUTING_GOLD_DATASET: RoutingGoldCase[] = [
 			"web.search": 0.9,
 		},
 		expected: { error: "capability_not_supported" },
+	},
+
+	// --- semantic routing control headers (#22) ---
+	{
+		id: "semantic-off-keeps-caller-chain",
+		tags: ["semantic_control", "passthrough"],
+		request: { model: CLAUDE, models: [GPT], messages: X_QUESTION },
+		semantic: X,
+		headers: { "Auto-Router-Semantic": "off" },
+		expected: { effectiveChain: [CLAUDE, GPT], reason: "requested_model" },
+	},
+	{
+		id: "semantic-off-structural-still-enforced",
+		tags: ["semantic_control", "structural"],
+		request: {
+			model: TEXT_ONLY,
+			models: [CLAUDE],
+			messages: IMAGE_QUESTION,
+			tools: [fn("save_note")],
+		},
+		semantic: X,
+		headers: { "Auto-Router-Semantic": "off" },
+		expected: { effectiveChain: [CLAUDE], reason: "filtered_fallback_chain" },
+	},
+	{
+		id: "capabilities-scope-web-search-only",
+		tags: ["semantic_control", "tools"],
+		request: { model: CLAUDE, messages: X_QUESTION },
+		semantic: X,
+		headers: { "Auto-Router-Capabilities": "web.search" },
+		expected: { effectiveChain: [CLAUDE], reason: "requested_model" },
+	},
+	{
+		id: "capabilities-scope-invalid",
+		tags: ["semantic_control"],
+		request: { model: CLAUDE, messages: X_QUESTION },
+		semantic: X,
+		headers: { "Auto-Router-Capabilities": "x.search" },
+		expected: { error: "invalid_router_request" },
 	},
 ];

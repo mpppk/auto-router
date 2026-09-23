@@ -195,6 +195,82 @@ describe("GET /api/v1/auto-router/traces/:traceId", () => {
 		expect(trace.semanticStatus).toBe("degraded");
 	});
 
+	test("records billable operations enabled by the router", async () => {
+		const { app } = setup({ "social.x.search": 0.95, "web.search": 0.95 });
+		const res = await request(app, "/api/v1/chat/completions", {
+			model: "anthropic/claude-sonnet-5",
+			messages,
+		});
+		const trace = (await (
+			await getTrace(app, res.headers.get("Auto-Router-Trace-Id") ?? "")
+		).json()) as RoutingTrace;
+		expect(trace.billing).toEqual({
+			jev: true,
+			serverTools: ["web_search", "x_search"],
+		});
+	});
+
+	test("caller-provided web search is not attributed to the router", async () => {
+		const { app } = setup({ "social.x.search": 0.95 });
+		const res = await request(app, "/api/v1/chat/completions", {
+			model: "x-ai/grok-4.7",
+			messages,
+			tools: [{ type: "openrouter:web_search" }],
+		});
+		const trace = (await (
+			await getTrace(app, res.headers.get("Auto-Router-Trace-Id") ?? "")
+		).json()) as RoutingTrace;
+		// caller の web_search に x_search を補完した分だけが router 由来
+		expect(trace.tools.completed).toEqual([{ type: "openrouter:web_search" }]);
+		expect(trace.billing.serverTools).toEqual(["x_search"]);
+	});
+
+	test("semantic routing disabled by header: no Jev, no injected tools", async () => {
+		const { app } = setup({ "social.x.search": 0.95, "web.search": 0.95 });
+		const res = await request(
+			app,
+			"/api/v1/chat/completions",
+			{ model: "anthropic/claude-sonnet-5", messages },
+			{ "Auto-Router-Semantic": "off" },
+		);
+		const trace = (await (
+			await getTrace(app, res.headers.get("Auto-Router-Trace-Id") ?? "")
+		).json()) as RoutingTrace;
+		expect(trace.semanticStatus).toBe("disabled");
+		expect(trace.billing).toEqual({ jev: false, serverTools: [] });
+		expect(trace.latencyMs.jev).toBeUndefined();
+	});
+
+	test("records the capability scope", async () => {
+		const { app } = setup({ "web.search": 0.95 });
+		const res = await request(
+			app,
+			"/api/v1/chat/completions",
+			{ model: "anthropic/claude-sonnet-5", messages },
+			{ "Auto-Router-Capabilities": "web.search,social.x.search" },
+		);
+		const trace = (await (
+			await getTrace(app, res.headers.get("Auto-Router-Trace-Id") ?? "")
+		).json()) as RoutingTrace;
+		expect(trace.semanticScope).toEqual(["web.search", "social.x.search"]);
+		expect(trace.billing.serverTools).toEqual(["web_search"]);
+	});
+
+	test("no billable server tools when the request is rejected", async () => {
+		const { app } = setup({ "social.x.search": 0.95 });
+		const res = await request(
+			app,
+			"/api/v1/chat/completions",
+			{ model: "anthropic/claude-sonnet-5", messages },
+			{ "Auto-Router-Allow-Model-Override": "false" },
+		);
+		expect(res.status).toBe(422);
+		const trace = (await (
+			await getTrace(app, res.headers.get("Auto-Router-Trace-Id") ?? "")
+		).json()) as RoutingTrace;
+		expect(trace.billing).toEqual({ jev: true, serverTools: [] });
+	});
+
 	test("another API key cannot read the trace", async () => {
 		const { app } = setup();
 		const res = await request(app, "/api/v1/chat/completions", {

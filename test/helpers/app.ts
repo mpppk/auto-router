@@ -5,6 +5,7 @@ import {
 } from "../../src/catalog/model-catalog";
 import type { Capability } from "../../src/core/capabilities";
 import {
+	type DetectOptions,
 	type SemanticDetection,
 	type SemanticDetector,
 	toRequirements,
@@ -24,13 +25,17 @@ export const fakeDetector = (
 	semantic: FakeSemantic = {},
 ): SemanticDetector & {
 	calls: number;
+	scopes: (readonly Capability[] | undefined)[];
 } => {
 	const detector = {
 		calls: 0,
-		async detect(context: {
-			conversation: unknown[];
-		}): Promise<SemanticDetection> {
+		scopes: [] as (readonly Capability[] | undefined)[],
+		async detect(
+			context: { conversation: unknown[] },
+			options: DetectOptions,
+		): Promise<SemanticDetection> {
 			detector.calls++;
+			detector.scopes.push(options.capabilities);
 			const messagesUsed = Math.min(context.conversation.length, 12);
 			if ("degraded" in semantic && typeof semantic.degraded === "string") {
 				return {
@@ -41,11 +46,15 @@ export const fakeDetector = (
 					latencyMs: 1,
 				};
 			}
+			const scope = options.capabilities;
+			const probabilities = Object.fromEntries(
+				Object.entries(semantic).filter(
+					([c]) => scope === undefined || scope.includes(c as Capability),
+				),
+			) as Partial<Record<Capability, number>>;
 			return {
 				status: "ok",
-				requirements: toRequirements(
-					semantic as Partial<Record<Capability, number>>,
-				),
+				requirements: toRequirements(probabilities),
 				messagesUsed,
 				latencyMs: 1,
 			};

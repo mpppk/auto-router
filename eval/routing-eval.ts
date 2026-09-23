@@ -259,7 +259,7 @@ const fixedDetector = (
 	semantic: RoutingGoldCase["semantic"],
 	thresholds: ThresholdConfig,
 ): SemanticDetector => ({
-	async detect(context) {
+	async detect(context, { capabilities: scope }) {
 		const messagesUsed = Math.min(context.conversation.length, 12);
 		if ("degraded" in semantic && typeof semantic.degraded === "string") {
 			return {
@@ -275,7 +275,10 @@ const fixedDetector = (
 			requirements: toRequirements(
 				Object.fromEntries(
 					SEMANTIC_CAPABILITIES.flatMap((c) =>
-						probabilities[c] !== undefined ? [[c, probabilities[c]]] : [],
+						probabilities[c] !== undefined &&
+						(scope === undefined || scope.includes(c))
+							? [[c, probabilities[c]]]
+							: [],
 					),
 				),
 				thresholds,
@@ -325,14 +328,24 @@ export const runRoutingEval = async (
 				"Auto-Router-Allow-Model-Override": String(
 					c.allowModelOverride ?? true,
 				),
+				...c.headers,
 			},
 			body: JSON.stringify(c.request),
 		});
-		const traceRes = await app.request(
-			`/api/v1/auto-router/traces/${res.headers.get("Auto-Router-Trace-Id")}`,
-			{ headers: { authorization: `Bearer ${apiKey}` } },
-		);
-		const trace = (await traceRes.json()) as RoutingTrace;
+		// header 不正等で routing 前に reject された場合は trace が無い。
+		const traceId = res.headers.get("Auto-Router-Trace-Id");
+		const trace: Pick<
+			RoutingTrace,
+			"semanticRequirements" | "effectiveModelChain"
+		> &
+			Partial<Pick<RoutingTrace, "reason">> =
+			traceId === null
+				? { semanticRequirements: [], effectiveModelChain: [] }
+				: ((await (
+						await app.request(`/api/v1/auto-router/traces/${traceId}`, {
+							headers: { authorization: `Bearer ${apiKey}` },
+						})
+					).json()) as RoutingTrace);
 		const body =
 			res.status === 200
 				? undefined
