@@ -28,10 +28,34 @@ describe("buildSemanticContext", () => {
 			instructions: ["sys"],
 		});
 		expect(context.conversation).toHaveLength(12);
-		expect(context.conversation[0]?.text).toBe("m8");
+		// 最新 user message (m18) より後の assistant (m19) は含めない
+		expect(context.conversation[0]?.text).toBe("m7");
+		expect(context.conversation.at(-1)?.text).toBe("m18");
 		expect(context.latestUserMessage).toBe("m18");
 		// system / developer は別枠
 		expect(context.instructions).toEqual(["sys"]);
+	});
+
+	test("agent loop turns after the latest user message do not change the Jev state", () => {
+		const base: ConversationMessage[] = [
+			{ role: "user", text: "こんにちは" },
+			{ role: "assistant", text: "こんにちは！" },
+			{ role: "user", text: "Xで今の反応を調べてメモして" },
+		];
+		const firstTurn = toJevState(
+			buildSemanticContext({ conversation: base, instructions: [] }),
+		);
+		const laterTurn = toJevState(
+			buildSemanticContext({
+				conversation: [
+					...base,
+					{ role: "assistant", text: "まずメモを作成します。" },
+					{ role: "assistant", text: "X の検索結果をまとめました。" },
+				],
+				instructions: [],
+			}),
+		);
+		expect(laterTurn).toEqual(firstTurn);
 	});
 
 	test("truncates huge messages in the middle", () => {

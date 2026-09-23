@@ -75,8 +75,18 @@ export const chatCompletionsAdapter: EndpointAdapter<ChatCompletionsRequest> = {
 		const conversation: ConversationMessage[] = [];
 		const instructions: string[] = [];
 		const contentParts: ContentPartRef[] = [];
+		let agentLoopTurns = 0;
 		for (const [i, message] of request.messages.entries()) {
 			if (!isRecord(message)) continue;
+			if (message.role === "user") {
+				agentLoopTurns = 0;
+			} else if (
+				message.role === "assistant" &&
+				Array.isArray(message.tool_calls) &&
+				message.tool_calls.length > 0
+			) {
+				agentLoopTurns++;
+			}
 			if (Array.isArray(message.content)) {
 				for (const [j, part] of message.content.entries()) {
 					if (
@@ -108,6 +118,7 @@ export const chatCompletionsAdapter: EndpointAdapter<ChatCompletionsRequest> = {
 		return {
 			conversation,
 			instructions,
+			agentLoopTurns,
 			features: {
 				contentParts,
 				tools: request.tools,

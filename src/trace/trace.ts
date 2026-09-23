@@ -26,6 +26,8 @@ export interface RoutingTrace {
 
 	context: {
 		conversationMessagesUsed: number;
+		/** 最新 user message 以降の assistant tool call 数。1 以上なら agent loop の途中。 */
+		agentLoopTurns: number;
 	};
 
 	semanticStatus: "ok" | "skipped" | "degraded" | "disabled";
@@ -168,7 +170,10 @@ export const buildRoutingTrace = (input: {
 		detail,
 		requestedModelChain: resolution.requestedChain,
 		effectiveModelChain: resolution.effectiveChain,
-		context: { conversationMessagesUsed: semantic.messagesUsed },
+		context: {
+			conversationMessagesUsed: semantic.messagesUsed,
+			agentLoopTurns: decision.agentLoopTurns,
+		},
 		semanticStatus: semantic.status,
 		...(decision.semanticScope
 			? { semanticScope: decision.semanticScope }

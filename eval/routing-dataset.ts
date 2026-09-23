@@ -42,6 +42,64 @@ const IMAGE_QUESTION = [
 	},
 ];
 const X = { "social.x.search": 0.95, "web.search": 0.9 };
+
+// --- agent loop (#21): 元 model 固有の field を含む会話履歴 ---
+const X_TASK = {
+	role: "user",
+	content:
+		"Xで今Claude Codeについてどんな反応があるか調べて、要点をメモに保存して",
+};
+const saveNoteCall = (id: string) => ({
+	id,
+	type: "function",
+	function: { name: "save_note", arguments: '{"text":"start"}' },
+});
+const CLAUDE_TOOL_TURN = {
+	role: "assistant",
+	content: "まずメモを作成します。",
+	tool_calls: [saveNoteCall("toolu_01GGgByN7jEjYfiS8yXEpMWx")],
+	reasoning_details: [
+		{
+			type: "reasoning.text",
+			format: "anthropic-claude-v1",
+			index: 0,
+			text: "The user wants me to call save_note first.",
+			signature: "EqoBCkgIBxABGAIiQL2...",
+		},
+	],
+};
+const GPT_TOOL_TURN = {
+	role: "assistant",
+	content: null,
+	tool_calls: [saveNoteCall("call_9nxzin2m6gjgzKOQnNcHBSA9")],
+	reasoning_details: [
+		{
+			type: "reasoning.encrypted",
+			format: "openai-responses-v1",
+			index: 0,
+			id: "rs_0a1b2c",
+			data: "gAAAAABo...",
+		},
+	],
+};
+const GROK_TOOL_TURN = {
+	role: "assistant",
+	content: null,
+	tool_calls: [saveNoteCall("call-2d78829e-07d5-47ac-ae7e-cafcc7240d5c-7")],
+	reasoning_details: [
+		{
+			type: "reasoning.encrypted",
+			format: "xai-responses-v1",
+			index: 0,
+			data: "eyJ4YWkiOi...",
+		},
+	],
+};
+const toolResult = (turn: { tool_calls: { id: string }[] }) => ({
+	role: "tool",
+	tool_call_id: turn.tool_calls[0]?.id,
+	content: "saved",
+});
 const fn = (name: string) => ({
 	type: "function",
 	function: { name, parameters: { type: "object", properties: {} } },
@@ -411,5 +469,63 @@ export const ROUTING_GOLD_DATASET: RoutingGoldCase[] = [
 		semantic: X,
 		headers: { "Auto-Router-Capabilities": "x.search" },
 		expected: { error: "invalid_router_request" },
+	},
+
+	// --- agent loop (#21) ---
+	{
+		id: "agent-loop-claude-history-override-to-grok",
+		tags: ["agent_loop", "tools"],
+		request: {
+			model: CLAUDE,
+			messages: [X_TASK, CLAUDE_TOOL_TURN, toolResult(CLAUDE_TOOL_TURN)],
+			tools: [fn("save_note")],
+			reasoning: { max_tokens: 1024 },
+		},
+		semantic: X,
+		expected: { effectiveChain: [GROK], reason: "capability_override" },
+	},
+	{
+		id: "agent-loop-gpt-history-override-to-grok",
+		tags: ["agent_loop", "tools"],
+		request: {
+			model: GPT,
+			messages: [
+				X_TASK,
+				GPT_TOOL_TURN,
+				toolResult(GPT_TOOL_TURN),
+				{ role: "assistant", content: "Xを検索します。" },
+			],
+			tools: [fn("save_note")],
+		},
+		semantic: X,
+		expected: { effectiveChain: [GROK], reason: "capability_override" },
+	},
+	{
+		id: "agent-loop-grok-history-stays-on-grok",
+		tags: ["agent_loop", "tools"],
+		request: {
+			model: GROK,
+			messages: [X_TASK, GROK_TOOL_TURN, toolResult(GROK_TOOL_TURN)],
+			tools: [fn("save_note")],
+		},
+		semantic: X,
+		expected: { effectiveChain: [GROK], reason: "requested_model" },
+	},
+	{
+		id: "agent-loop-new-user-turn-returns-to-caller-model",
+		tags: ["agent_loop", "passthrough"],
+		request: {
+			model: CLAUDE,
+			messages: [
+				X_TASK,
+				GROK_TOOL_TURN,
+				toolResult(GROK_TOOL_TURN),
+				{ role: "assistant", content: "X上では好意的な反応が多いです。" },
+				{ role: "user", content: "ありがとう。今の要約を英語に翻訳して" },
+			],
+			tools: [fn("save_note")],
+		},
+		semantic: {},
+		expected: { effectiveChain: [CLAUDE], reason: "requested_model" },
 	},
 ];
