@@ -53,7 +53,9 @@ describe("summary headers", () => {
 		expect(res.headers.get("Auto-Router-Requested-Model")).toBe(
 			"anthropic/claude-sonnet-5,openai/gpt-5",
 		);
-		expect(res.headers.get("Auto-Router-Selected-Model")).toBe("x-ai/grok-4.7");
+		expect(res.headers.get("Auto-Router-Selected-Model")).toBe(
+			"x-ai/grok-4.7,x-ai/grok-4.6",
+		);
 		expect(res.headers.get("Auto-Router-Route-Reason")).toBe(
 			"capability_override",
 		);
@@ -122,7 +124,7 @@ describe("GET /api/v1/auto-router/traces/:traceId", () => {
 			id,
 			detail: "summary",
 			requestedModelChain: ["anthropic/claude-sonnet-5"],
-			effectiveModelChain: ["x-ai/grok-4.7"],
+			effectiveModelChain: ["x-ai/grok-4.7", "x-ai/grok-4.6"],
 			reason: "capability_override",
 			context: { conversationMessagesUsed: 1 },
 			tools: {
@@ -147,6 +149,12 @@ describe("GET /api/v1/auto-router/traces/:traceId", () => {
 			},
 			{
 				model: "x-ai/grok-4.7",
+				origin: "default_route",
+				accepted: true,
+				conflicts: [],
+			},
+			{
+				model: "x-ai/grok-4.6",
 				origin: "default_route",
 				accepted: true,
 				conflicts: [],

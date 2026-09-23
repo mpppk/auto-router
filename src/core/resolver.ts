@@ -57,6 +57,8 @@ export interface ResolveInput {
 	features: RequestFeatures;
 	catalog: ModelCatalog;
 	allowModelOverride: boolean;
+	/** capability default route の上書き (Worker var `DEFAULT_ROUTE_MODELS`)。 */
+	defaultRouteModels?: readonly string[];
 }
 
 /** model / models 未指定時の candidate 表示名。 */
@@ -65,14 +67,21 @@ export const ACCOUNT_DEFAULT_MODEL = "(account default)";
 const sameChain = (a: readonly string[], b: readonly string[]) =>
 	a.length === b.length && a.every((m, i) => m === b[i]);
 
-/** Hard Requirement を持つ semantic capability の default route model (registry 順・重複なし)。 */
-const defaultRouteModels = (requirements: readonly Requirement[]) => {
+/**
+ * Hard Requirement を持つ semantic capability の default route model (registry 順・重複なし)。
+ * `override` が指定されていれば、default route を持つ capability の route をそれに置き換える。
+ */
+const defaultRouteModels = (
+	requirements: readonly Requirement[],
+	override: readonly string[] | undefined,
+) => {
 	const required = new Set(
 		requirements.flatMap((r) => (r.kind === "semantic" ? [r.capability] : [])),
 	);
 	const models = SEMANTIC_CAPABILITIES.flatMap((c) => {
-		const model = SEMANTIC_REGISTRY[c].defaultRoute?.model;
-		return required.has(c) && model !== undefined ? [model] : [];
+		const route = SEMANTIC_REGISTRY[c].defaultRoute;
+		if (!required.has(c) || route === undefined) return [];
+		return override ?? route.models;
 	});
 	return [...new Set(models)];
 };
@@ -176,14 +185,17 @@ export const resolveRoute = (input: ResolveInput): RouteResolution => {
 	}
 
 	// 2. caller chain が全滅: override が許可されていれば capability default route に置換する。
-	//    incompatible な caller model は fallback に残さない。
+	//    incompatible な caller model は fallback に残さない。default route が複数 model の場合も
+	//    全候補を評価し、compatible なものだけを fallback chain にする。
 	const defaults = input.allowModelOverride
-		? defaultRouteModels(hard).map((m) => evaluate(m, "default_route"))
+		? defaultRouteModels(hard, input.defaultRouteModels).map((m) =>
+				evaluate(m, "default_route"),
+			)
 		: [];
 	const candidates = [...requested, ...defaults];
-	const selected = defaults.find((c) => c.accepted);
-	if (selected !== undefined) {
-		return toResolution("capability_override", candidates, [selected.model]);
+	const selected = defaults.filter((c) => c.accepted).map((c) => c.model);
+	if (selected.length > 0) {
+		return toResolution("capability_override", candidates, selected);
 	}
 
 	// 3. 単一 route で全 Hard Requirements を満たせない。
