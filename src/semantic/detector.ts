@@ -6,12 +6,19 @@ import {
 } from "../core/capabilities";
 import { RouterError } from "../core/errors";
 import type { RoutingContext } from "../core/types";
+import { apiKeyFingerprint } from "../trace/fingerprint";
+import { type SemanticCache, semanticCacheKey } from "./cache";
 import {
 	buildSemanticContext,
 	type SemanticContext,
 	toJevState,
 } from "./context";
-import { type JevClient, JevError, type JevFailureReason } from "./jev-client";
+import {
+	JEV_MODEL,
+	type JevClient,
+	JevError,
+	type JevFailureReason,
+} from "./jev-client";
 import { CAPABILITY_QUESTIONS } from "./questions";
 
 export interface Threshold {
@@ -43,6 +50,8 @@ interface DetectionBase {
 	/** Jev に渡した user / assistant message 数。 */
 	messagesUsed: number;
 	latencyMs?: number;
+	/** cache が有効な場合の結果。hit なら Jev を呼んでいない。 */
+	cache?: "hit" | "miss";
 }
 
 export type SemanticDetection =
@@ -59,6 +68,14 @@ export type SemanticDetection =
 
 export interface SemanticDetectorOptions {
 	jev: JevClient;
+	/** 判定結果の短期 cache (#26)。未指定なら毎回 Jev を呼ぶ。 */
+	cache?: {
+		store: SemanticCache;
+		/** cache key の API key fingerprint 用 secret (`TRACE_FINGERPRINT_SECRET`)。 */
+		fingerprintSecret?: string;
+		/** Jev の model id (cache key に含める)。 */
+		model?: string;
+	};
 	thresholds?: ThresholdConfig;
 	capabilities?: readonly Capability[];
 	now?: () => number;
@@ -120,17 +137,53 @@ export const createSemanticDetector = (
 			);
 
 			const started = now();
+			const state = toJevState(semantic);
+			const cacheKey = options.cache
+				? await semanticCacheKey({
+						ownerFingerprint: await apiKeyFingerprint(
+							apiKey,
+							options.cache.fingerprintSecret,
+						),
+						model: options.cache.model ?? JEV_MODEL,
+						state,
+						questions,
+					})
+				: undefined;
+			const cached =
+				cacheKey === undefined
+					? undefined
+					: await options.cache?.store.get(cacheKey).catch(() => undefined);
+			if (cached !== undefined && targets.every((c) => c in cached)) {
+				return {
+					status: "ok",
+					requirements: toRequirements(cached, options.thresholds),
+					messagesUsed,
+					latencyMs: now() - started,
+					cache: "hit",
+				};
+			}
 			try {
-				const probabilities = await options.jev.noul(
-					toJevState(semantic),
-					questions,
-					{ apiKey, ...(signal ? { signal } : {}) },
-				);
+				const probabilities = await options.jev.noul(state, questions, {
+					apiKey,
+					...(signal ? { signal } : {}),
+				});
+				if (cacheKey !== undefined) {
+					// cache の書き込み失敗で request を失敗させない。
+					await options.cache?.store
+						.put(cacheKey, probabilities)
+						.catch((err: unknown) =>
+							console.warn(
+								"failed to cache semantic detection",
+								err instanceof Error ? err.message : err,
+							),
+						);
+				}
 				return {
 					status: "ok",
 					requirements: toRequirements(probabilities, options.thresholds),
 					messagesUsed,
 					latencyMs: now() - started,
+					...(cacheKey !== undefined ? { cache: "miss" as const } : {}),
 				};
 			} catch (err) {
 				const reason: JevFailureReason =
@@ -149,6 +202,7 @@ export const createSemanticDetector = (
 					requirements: [],
 					messagesUsed,
 					latencyMs: now() - started,
+					...(cacheKey !== undefined ? { cache: "miss" as const } : {}),
 				};
 			}
 		},

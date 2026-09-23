@@ -79,7 +79,7 @@ auto-router は BYOK のため、以下の料金は caller 自身の OpenRouter 
 
 | 操作 | いつ発生するか | 料金の目安 | 抑止する方法 |
 | --- | --- | --- | --- |
-| Jev (`~typesafe/jev-latest`) による semantic 判定 | user message を含む全 request (routing 前) | 約 $0.00002 / request | `Auto-Router-Semantic: off` |
+| Jev (`~typesafe/jev-latest`) による semantic 判定 | user message を含む request (routing 前)。同一 context は 5 分間 cache | 約 $0.00002 / request | `Auto-Router-Semantic: off` |
 | `openrouter:web_search` tool の注入 | `web.search` が required と判定されたとき | OpenRouter の web search 料金 (engine / 結果件数に依存) | `Auto-Router-Capabilities` から `web.search` を外す / `Auto-Router-Semantic: off` |
 | Grok + X Search (`x_search`) への切り替え | `social.x.search` が required と判定されたとき | Grok の token 料金 + X Search の従量課金 ($5 / 1,000 posts、2026-09-21〜) | `Auto-Router-Capabilities` から `social.x.search` を外す / `Auto-Router-Allow-Model-Override: false` / `Auto-Router-Semantic: off` |
 
@@ -159,6 +159,18 @@ model が切り替わっても caller の会話履歴 (assistant の `reasoning_
 | `x-ai/grok-4.7` (`reasoning.encrypted` `xai-responses-v1`、`call-...` id) | `anthropic/claude-sonnet-5` (thinking) |
 
 trace の `context.agentLoopTurns` は最新の user message 以降の assistant tool call 数です (0 なら新しい user turn)。
+
+### Jev 判定の cache
+
+agent loop の各ターンは Jev への入力が同一になるため、判定結果 (probability) を Workers Cache API に 5 分間 cache し、同一 context の連続 request では Jev を1回だけ呼びます (Jev の latency 約 300〜500ms と caller への課金を削減)。
+
+- cache key は SHA-256(API key fingerprint, Jev model, Jev に渡す state (直近の会話・instructions), question 定義)。caller ごとに分離し、question 文面・model・会話が変われば別 key になる
+- 保存するのは probability だけで、message 本文・raw API key は保存しない
+- threshold は取得後に適用するため、threshold を変えても cache 済みの probability で正しく再判定される
+- Jev 障害 (degraded) の結果は cache しない。cache の読み書き失敗時は通常どおり Jev を呼ぶ
+- `Auto-Router-Semantic: off` の場合は cache も参照しない
+- trace の `semanticCache` (`hit` / `miss`) と `latencyMs.jev` で確認できる。hit の場合 `billing.jev` は `false`
+- Cache API は data center 単位のため、別の data center に届いた request は miss になる
 
 ### Model catalog
 
