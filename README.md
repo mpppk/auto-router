@@ -27,9 +27,20 @@ bun run dev        # wrangler dev (http://localhost:8787)
 
 ### Secrets
 
-ローカルでは `.dev.vars` に、本番では `wrangler secret put <NAME>` で設定します。
+ローカルで使う secret は 1Password に置き、`.env.template` から `.env` を生成します。
 
-- `JEV_API_KEY` — Jev semantic detector 用 (#3 以降で使用)
+```sh
+op inject -i .env.template -o .env
+```
+
+| 変数 | 用途 |
+| --- | --- |
+| `OPENROUTER_API_KEY` | 動作確認・e2e・eval 用。auto-router は BYOK なので Worker 自体は OpenRouter キーを持たない |
+| `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` | Wrangler CLI (deploy, D1 migration など) |
+
+`.env` は Bun と Wrangler が自動で読み込みます。`CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false` により、これらの値は Worker の binding には渡りません。
+
+Jev (semantic detector) は OpenRouter の `~typesafe/jev-latest` を呼び出し側の OpenRouter キーで利用するため、専用の API キーは不要です。
 
 ## CI/CD
 
