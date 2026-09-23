@@ -9,6 +9,8 @@ describe("chatCompletionsAdapter.parseRequest", () => {
 		["non-array models", { models: "a", messages: [] }],
 		["models with non-string", { models: ["a", 1], messages: [] }],
 		["missing messages", { model: "a" }],
+		["non-array tools", { model: "a", messages: [], tools: {} }],
+		["non-object provider", { model: "a", messages: [], provider: "x" }],
 	])("rejects %s", (_, body) => {
 		expect(() => adapter.parseRequest(body)).toThrow(RouterError);
 	});
@@ -33,13 +35,15 @@ describe("chatCompletionsAdapter.extractRoutingContext", () => {
 				{ role: "assistant", content: "answer" },
 			],
 		});
-		expect(adapter.extractRoutingContext(request)).toEqual({
-			instructions: ["be nice", "dev"],
-			conversation: [
-				{ role: "user", text: "what is this?" },
-				{ role: "assistant", text: "answer" },
-			],
-		});
+		const context = adapter.extractRoutingContext(request);
+		expect(context.instructions).toEqual(["be nice", "dev"]);
+		expect(context.conversation).toEqual([
+			{ role: "user", text: "what is this?" },
+			{ role: "assistant", text: "answer" },
+		]);
+		expect(context.features.contentParts).toEqual([
+			{ type: "image_url", path: "messages[2].content[1]" },
+		]);
 	});
 });
 
@@ -85,5 +89,31 @@ describe("chatCompletionsAdapter.applyRoutePlan", () => {
 		const patched = adapter.applyRoutePlan(request, { modelChain: ["c"] });
 		expect(patched.model).toBe("c");
 		expect("models" in patched).toBe(false);
+	});
+});
+
+describe("chatCompletionsAdapter features", () => {
+	test("exposes structural request fields", () => {
+		const request = adapter.parseRequest({
+			model: "a",
+			messages: [],
+			tools: [{ type: "function", function: { name: "f" } }],
+			tool_choice: "none",
+			response_format: { type: "json_object" },
+			reasoning: { effort: "high" },
+			reasoning_effort: "low",
+			include_reasoning: true,
+			provider: { only: ["openai"] },
+		});
+		expect(adapter.extractRoutingContext(request).features).toEqual({
+			contentParts: [],
+			tools: [{ type: "function", function: { name: "f" } }],
+			toolChoice: "none",
+			responseFormat: { type: "json_object" },
+			reasoning: { effort: "high" },
+			reasoningEffort: "low",
+			includeReasoning: true,
+			provider: { only: ["openai"] },
+		});
 	});
 });

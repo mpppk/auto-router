@@ -1,9 +1,32 @@
 import type { RequestedModelChain } from "./model-chain";
+import type { ProviderPreferences } from "./provider";
 
 /** semantic routing に利用する自然言語message。 */
 export interface ConversationMessage {
 	role: "user" | "assistant";
 	text: string;
+}
+
+/** message 内の非テキスト content part。 */
+export interface ContentPartRef {
+	type: string;
+	/** 例: `messages[2].content[1]` */
+	path: string;
+}
+
+/**
+ * structural requirement 判定に使う request の特徴。
+ * endpoint 固有の field 名は adapter 側で吸収する。
+ */
+export interface RequestFeatures {
+	contentParts: ContentPartRef[];
+	tools?: unknown[];
+	toolChoice?: unknown;
+	responseFormat?: unknown;
+	reasoning?: unknown;
+	reasoningEffort?: unknown;
+	includeReasoning?: unknown;
+	provider?: ProviderPreferences;
 }
 
 /**
@@ -15,6 +38,7 @@ export interface RoutingContext {
 	conversation: ConversationMessage[];
 	/** system / developer 相当の指示 (古い順)。conversation とは別枠で扱う。 */
 	instructions: string[];
+	features: RequestFeatures;
 }
 
 /**
@@ -25,5 +49,5 @@ export interface EffectiveRoutePlan {
 	modelChain: RequestedModelChain;
 	tools?: unknown[];
 	toolChoice?: { value: unknown };
-	provider?: Record<string, unknown>;
+	provider?: ProviderPreferences;
 }
