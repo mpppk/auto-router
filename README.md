@@ -212,6 +212,23 @@ bun run eval:routing --live                            # semantic 判定に実 J
 - dataset: `eval/routing-dataset.ts`
 - forwarded request を resolver とは独立に registry / model catalog で検査し、Hard Requirement violation・incompatible fallback leakage・unnecessary model override rate・caller tool preservation failures を集計 (violation / leakage / tool 保持失敗が1件でもあれば exit 1)
 
+定期実行: `.github/workflows/eval.yml` が毎日 (と `workflow_dispatch` で手動) 実 Jev を使う eval を実行します。Jev は alias (`~typesafe/jev-latest`) のため、upstream の model 更新で判定傾向が変わったことを検知するためです。
+
+- `bun run eval:semantic --min-precision 0.9 --min-recall 0.7`: capability ごとの precision / recall が閾値を下回れば failure
+- `bun run eval:routing --live --strict`: violation / leakage に加え、期待値の不一致でも failure
+- 結果 (`--json` の report とテキスト出力) を artifact `eval-<run number>` に 90 日保存し、job summary にも表示。scheduled workflow の failure は GitHub から通知される
+- GitHub Secret `OPENROUTER_API_KEY` を使用 (smoke test と共用)
+
+semantic dataset には英語 / 日英混在、曖昧な質問 (「最近の〇〇どう？」「話題の〜」)、12 件の窓の境界付近に検索要求がある長い会話、system prompt で検索を指示 / 禁止するケースを含みます。現在の結果 (2026-09-24):
+
+| capability | n | precision | recall | 備考 |
+| --- | --- | --- | --- | --- |
+| `social.x.search` | 46 | 1.00 | 1.00 | system prompt で X 検索を禁止したケースは uncertain (p=0.75) |
+| `web.search` | 29 | 1.00 | 0.80 | 曖昧な質問 (「最近のiPhoneってどう？」「話題の生成AIツール」) は uncertain / not_required になりやすい |
+| Places 系 | 3〜6 | 1.00 | 1.00 | |
+
+system prompt の検索禁止 / 指示を Jev が考慮するよう、question の criteria に system instructions を明記しています (追加前は検索禁止の system prompt でも X Search p=0.92 / Web Search p=0.87 で required になっていた)。
+
 threshold は暫定の `required: p >= 0.8` / `not_required: p <= 0.2` を維持しています。現在の dataset では X Search の required threshold 0.5〜0.8 で precision / recall とも 1.00、0.9 では recall が 0.63 に低下するため、false negative を避ける観点から 0.8 を上限としています。
 
 ## CI/CD

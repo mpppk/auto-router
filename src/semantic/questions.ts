@@ -13,7 +13,7 @@ export const CAPABILITY_QUESTIONS: Record<Capability, NoulQuestion> = {
 		criteria: {
 			true: "The latest message asks for current reactions, opinions, trends, discussions or specific posts on X/Twitter, explicitly or by clearly continuing an earlier X search request (e.g. 'what about product B?').",
 			false:
-				"The latest message only mentions X/Twitter as a topic (what it is, how its API works, writing a post, comparing it with other services), asks to summarize or reformat results already in the conversation, changes the topic, or says not to search.",
+				"The latest message only mentions X/Twitter as a topic (what it is, how its API works, writing a post, comparing it with other services), asks to summarize or reformat results already in the conversation, changes the topic, or the user or the system instructions say not to search X or not to search at all.",
 		},
 	},
 	"web.search": {
@@ -21,9 +21,9 @@ export const CAPABILITY_QUESTIONS: Record<Capability, NoulQuestion> = {
 		instructions:
 			"To answer the latest user message correctly, must the assistant search the web right now?",
 		criteria: {
-			true: "The latest message needs current, recent, time-sensitive or specific external information (news, prices, releases, events, schedules, live data, or facts likely newer than the model's training data).",
+			true: "The latest message needs current, recent, time-sensitive or specific external information (news, prices, releases, events, schedules, live data, or facts likely newer than the model's training data), or the system instructions require searching the web before answering.",
 			false:
-				"The latest message can be answered from general knowledge, reasoning, writing, translation, coding, or from information already present in the conversation, or the user says not to search.",
+				"The latest message can be answered from general knowledge, reasoning, writing, translation, coding, or from information already present in the conversation, or the user or the system instructions say not to search.",
 		},
 	},
 	"places.search": {
