@@ -4,6 +4,7 @@ import {
 	type SemanticDecision,
 	type SemanticRequirement,
 } from "../core/capabilities";
+import { RouterError } from "../core/errors";
 import type { RoutingContext } from "../core/types";
 import {
 	buildSemanticContext,
@@ -134,6 +135,13 @@ export const createSemanticDetector = (
 			} catch (err) {
 				const reason: JevFailureReason =
 					err instanceof JevError ? err.reason : "jev_error";
+				if (reason === "jev_unauthorized") {
+					// 不正な key は upstream でも必ず失敗するため、degraded で続行せず 401 にする。
+					throw new RouterError(
+						"invalid_api_key",
+						"OpenRouter rejected the API key.",
+					);
+				}
 				console.warn("semantic detection degraded", reason);
 				return {
 					status: "degraded",

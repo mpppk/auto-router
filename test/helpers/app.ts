@@ -1,4 +1,4 @@
-import { createApp } from "../../src/app";
+import { type AppDeps, createApp } from "../../src/app";
 import {
 	createStaticModelCatalog,
 	type ModelProfile,
@@ -109,10 +109,13 @@ export const createTestApp = (
 		semantic?: FakeSemantic;
 		profiles?: ModelProfile[];
 		respond?: Parameters<typeof createFakeUpstream>[0];
+		rateLimiters?: AppDeps["rateLimiters"];
+		detector?: SemanticDetector;
 	} = {},
 ) => {
 	const upstream = createFakeUpstream(options.respond);
-	const detector = fakeDetector(options.semantic);
+	const fake = fakeDetector(options.semantic);
+	const detector = options.detector ?? fake;
 	const catalog = createStaticModelCatalog(options.profiles ?? MODEL_PROFILES);
 	const traceStore = createMemoryTraceStore();
 	const app = createApp({
@@ -120,6 +123,7 @@ export const createTestApp = (
 		detector,
 		catalog: { load: async () => catalog },
 		traceStore,
+		...(options.rateLimiters ? { rateLimiters: options.rateLimiters } : {}),
 	});
-	return { app, upstream, detector, traceStore };
+	return { app, upstream, detector: fake, traceStore };
 };

@@ -1,4 +1,4 @@
-import { type Context, Hono } from "hono";
+import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
 import {
 	createOpenRouterModelCatalogSource,
@@ -7,6 +7,7 @@ import {
 import { RouterError } from "./core/errors";
 import { handleChatCompletions, type TraceDeps } from "./http/chat-completions";
 import { handleGetTrace, handleInspect } from "./http/debug";
+import { enforceRateLimit, type RateLimiter } from "./http/rate-limit";
 import type { RoutingDeps } from "./routing/decide";
 import {
 	createSemanticDetector,
@@ -35,7 +36,12 @@ export interface AppDeps {
 	catalog?: ModelCatalogSource;
 	/** 指定しない場合は `TRACES_DB` binding (無ければ in-memory) を使う。 */
 	traceStore?: TraceStore;
+	/** 指定しない場合は `RATE_LIMIT_IP` / `RATE_LIMIT_KEY` binding (無ければ無制限) を使う。 */
+	rateLimiters?: { ip?: RateLimiter; key?: RateLimiter };
 }
+
+/** `wrangler.jsonc` の ratelimits の period (秒)。 */
+export const RATE_LIMIT_PERIOD_SECONDS = 60;
 
 /** browser から読めるようにする auto-router 独自response header。 */
 export const EXPOSED_HEADERS = [
@@ -86,6 +92,27 @@ export const createApp = (deps: AppDeps = {}) => {
 
 	app.get("/health", (c) => c.json({ status: "ok" }));
 
+	// Jev 呼び出し・D1 書き込みの前に IP / API key 単位で rate limit する。
+	const rateLimit: MiddlewareHandler<{ Bindings: Bindings }> = async (
+		c,
+		next,
+	) => {
+		const env = c.env as Partial<Bindings> | undefined;
+		const ip = deps.rateLimiters?.ip ?? env?.RATE_LIMIT_IP;
+		const key = deps.rateLimiters?.key ?? env?.RATE_LIMIT_KEY;
+		await enforceRateLimit(c.req.raw, {
+			...(ip ? { ip } : {}),
+			...(key ? { key } : {}),
+			...(env?.TRACE_FINGERPRINT_SECRET
+				? { fingerprintSecret: env.TRACE_FINGERPRINT_SECRET }
+				: {}),
+			periodSeconds: RATE_LIMIT_PERIOD_SECONDS,
+		});
+		await next();
+	};
+	app.use("/api/v1/*", rateLimit);
+	app.use("/v1/*", rateLimit);
+
 	app.post("/api/v1/auto-router/inspect", (c) =>
 		handleInspect(c.req.raw, routing),
 	);
@@ -113,7 +140,7 @@ export const createApp = (deps: AppDeps = {}) => {
 
 	app.onError((err, c) => {
 		if (err instanceof RouterError) {
-			return c.json(err.toBody(), err.status as 400);
+			return c.json(err.toBody(), err.status as 400, err.headers);
 		}
 		console.error("unhandled error", err instanceof Error ? err.message : err);
 		return c.json(

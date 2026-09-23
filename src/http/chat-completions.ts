@@ -3,7 +3,7 @@ import { RouterError } from "../core/errors";
 import type { EffectiveRoutePlan } from "../core/types";
 import { decideRoute, type RoutingDeps } from "../routing/decide";
 import { apiKeyFingerprint } from "../trace/fingerprint";
-import { summaryHeaders } from "../trace/headers";
+import { summaryHeaders, TRACE_ID_HEADER } from "../trace/headers";
 import type { TraceStore } from "../trace/store";
 import {
 	buildRoutingTrace,
@@ -150,6 +150,12 @@ export const handleChatCompletions = async (
 		request.signal,
 	);
 	trace.latencyMs.upstream = Date.now() - started;
+
+	// 不正な API key の request は trace を保存しない (D1 書き込みの abuse 抑止)。
+	if (upstream.status === 401) {
+		const { [TRACE_ID_HEADER]: _, ...headers } = summaryHeaders(trace);
+		return toClientResponse(upstream, headers);
+	}
 	await persistTrace(deps.trace, trace, prepared.apiKey);
 
 	return toClientResponse(upstream, summaryHeaders(trace));
