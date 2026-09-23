@@ -4,6 +4,7 @@ import type { EffectiveRoutePlan } from "../core/types";
 import { decideRoute, type RoutingDeps } from "../routing/decide";
 import { apiKeyFingerprint } from "../trace/fingerprint";
 import { summaryHeaders, TRACE_ID_HEADER } from "../trace/headers";
+import { logRouterEvent, routingDecisionLog } from "../trace/log";
 import type { TraceStore } from "../trace/store";
 import {
 	buildRoutingTrace,
@@ -130,6 +131,10 @@ export const handleChatCompletions = async (
 
 	const { resolution } = decision;
 	if (resolution.error !== undefined || resolution.plan === undefined) {
+		logRouterEvent({
+			event: "routing_decision",
+			...routingDecisionLog(trace, { endpoint: "chat_completions" }),
+		});
 		await persistTrace(deps.trace, trace, prepared.apiKey);
 		const error =
 			resolution.error ??
@@ -151,9 +156,17 @@ export const handleChatCompletions = async (
 		request.signal,
 	);
 	trace.latencyMs.upstream = Date.now() - started;
+	logRouterEvent({
+		event: "routing_decision",
+		...routingDecisionLog(trace, {
+			endpoint: "chat_completions",
+			upstreamStatus: upstream.status,
+		}),
+	});
 
 	// 不正な API key の request は trace を保存しない (D1 書き込みの abuse 抑止)。
 	if (upstream.status === 401) {
+		logRouterEvent({ event: "invalid_api_key", source: "upstream" });
 		const { [TRACE_ID_HEADER]: _, ...headers } = summaryHeaders(trace);
 		return toClientResponse(upstream, headers);
 	}

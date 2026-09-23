@@ -186,6 +186,25 @@ structural requirement の判定には OpenRouter `GET /models` の `input_modal
 - raw Authorization / message 本文は保存しない。trace の所有者は API key の HMAC fingerprint (`TRACE_FINGERPRINT_SECRET`) で判定
 - migration は CI の deploy 前に `wrangler d1 migrations apply TRACES_DB --remote` で適用 (ローカルは `--local`)
 
+### 構造化ログ
+
+routing 完了時に1 request 1 行の JSON を `console.log` で出力します (`observability.enabled: true`)。Workers Observability は JSON の field を index するため、dashboard の Query Builder で field 単位に集計できます。message 本文・raw API key・key fingerprint は出力しません。
+
+| `event` | 出力時 | 主な field |
+| --- | --- | --- |
+| `routing_decision` | chat completions (upstream 応答後 / router error 時)、inspect | `endpoint`, `traceId`, `reason`, `overridden`, `semanticStatus`, `degradedReason`, `semanticCache`, `requiredCapabilities`, `structuralCapabilities`, `capabilityDegrades`, `requestedModel`, `effectiveModel`, `requestedChainLength`, `effectiveChainLength`, `candidates`, `rejectedCandidates`, `agentLoopTurns`, `injectedServerTools`, `jevCalled`, `errorCode`, `upstreamStatus`, `latencyMs.{jev,routing,upstream}` |
+| `rate_limited` | rate limit 超過 | `scope` (`ip` / `key`) |
+| `invalid_api_key` | Jev / upstream が 401 | `source` (`jev` / `upstream`) |
+
+集計例 (Observability → Query Builder、filter `source = auto-router` かつ `event = routing_decision`):
+
+- route reason の内訳: group by `reason` で Count
+- degraded 率: group by `semanticStatus` (`degraded` の割合)、原因は `degradedReason`
+- override 率: group by `overridden`
+- capability ごとの required 率: group by `requiredCapabilities`
+- Jev latency / cache 効果: `latencyMs.jev` の P50 / P99、group by `semanticCache`
+- abuse: filter `event = rate_limited` / `invalid_api_key` で Count
+
 ## Eval
 
 capability detector / routing の品質を gold dataset で評価します (#8)。
