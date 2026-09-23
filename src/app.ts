@@ -1,5 +1,6 @@
 import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
+import { createKvModelCatalogSource } from "./catalog/kv-catalog";
 import {
 	createOpenRouterModelCatalogSource,
 	type ModelCatalogSource,
@@ -60,12 +61,25 @@ export const createApp = (deps: AppDeps = {}) => {
 		baseUrl: deps.upstream?.baseUrl ?? DEFAULT_OPENROUTER_BASE_URL,
 		fetch: deps.upstream?.fetch ?? ((input, init) => fetch(input, init)),
 	};
-	const routing: RoutingDeps = {
-		detector:
-			deps.detector ??
-			createSemanticDetector({ jev: createJevClient(upstream) }),
-		catalog: deps.catalog ?? createOpenRouterModelCatalogSource(upstream),
+	const detector =
+		deps.detector ?? createSemanticDetector({ jev: createJevClient(upstream) });
+	// isolate 内 cache を request 間で共有するため、source は isolate ごとに1つだけ作る。
+	let directCatalog: ModelCatalogSource | undefined;
+	let kvCatalog: ModelCatalogSource | undefined;
+	const catalogFor = (env: Partial<Bindings> | undefined) => {
+		if (deps.catalog) return deps.catalog;
+		const kv = env?.CATALOG_KV;
+		if (kv) {
+			kvCatalog ??= createKvModelCatalogSource({ ...upstream, kv });
+			return kvCatalog;
+		}
+		directCatalog ??= createOpenRouterModelCatalogSource(upstream);
+		return directCatalog;
 	};
+	const routingDeps = (c: Context<{ Bindings: Bindings }>): RoutingDeps => ({
+		detector,
+		catalog: catalogFor(c.env as Partial<Bindings> | undefined),
+	});
 	const fallbackTraceStore = createMemoryTraceStore();
 
 	const traceDeps = (c: Context<{ Bindings: Bindings }>): TraceDeps => {
@@ -114,7 +128,7 @@ export const createApp = (deps: AppDeps = {}) => {
 	app.use("/v1/*", rateLimit);
 
 	app.post("/api/v1/auto-router/inspect", (c) =>
-		handleInspect(c.req.raw, routing),
+		handleInspect(c.req.raw, routingDeps(c)),
 	);
 	app.get("/api/v1/auto-router/traces/:traceId", (c) =>
 		handleGetTrace(c.req.raw, c.req.param("traceId"), traceDeps(c)),
@@ -124,7 +138,7 @@ export const createApp = (deps: AppDeps = {}) => {
 		app.post(`${prefix}/chat/completions`, (c) =>
 			handleChatCompletions(c.req.raw, {
 				upstream,
-				...routing,
+				...routingDeps(c),
 				trace: traceDeps(c),
 			}),
 		);
