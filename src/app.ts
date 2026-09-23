@@ -1,11 +1,12 @@
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { cors } from "hono/cors";
 import {
 	createOpenRouterModelCatalogSource,
 	type ModelCatalogSource,
 } from "./catalog/model-catalog";
 import { RouterError } from "./core/errors";
-import { handleChatCompletions } from "./http/chat-completions";
+import { handleChatCompletions, type TraceDeps } from "./http/chat-completions";
+import { handleGetTrace, handleInspect } from "./http/debug";
 import type { RoutingDeps } from "./routing/decide";
 import {
 	createSemanticDetector,
@@ -13,14 +14,27 @@ import {
 } from "./semantic/detector";
 import { createJevClient } from "./semantic/jev-client";
 import {
+	createD1TraceStore,
+	createMemoryTraceStore,
+	type TraceStore,
+} from "./trace/store";
+import {
 	DEFAULT_OPENROUTER_BASE_URL,
 	type UpstreamConfig,
 } from "./upstream/openrouter";
+
+/** Worker の binding / secret。secret は `wrangler secret put` で設定する。 */
+export type Bindings = Env & {
+	/** trace ownership 用 API key fingerprint の HMAC secret。 */
+	TRACE_FINGERPRINT_SECRET?: string;
+};
 
 export interface AppDeps {
 	upstream?: Partial<UpstreamConfig>;
 	detector?: SemanticDetector;
 	catalog?: ModelCatalogSource;
+	/** 指定しない場合は `TRACES_DB` binding (無ければ in-memory) を使う。 */
+	traceStore?: TraceStore;
 }
 
 /** browser から読めるようにする auto-router 独自response header。 */
@@ -31,6 +45,9 @@ export const EXPOSED_HEADERS = [
 	"Auto-Router-Route-Reason",
 	"Auto-Router-Degraded",
 ];
+
+export const createTraceStore = (env: Partial<Bindings> | undefined) =>
+	env?.TRACES_DB ? createD1TraceStore(env.TRACES_DB) : undefined;
 
 export const createApp = (deps: AppDeps = {}) => {
 	const upstream: UpstreamConfig = {
@@ -43,16 +60,46 @@ export const createApp = (deps: AppDeps = {}) => {
 			createSemanticDetector({ jev: createJevClient(upstream) }),
 		catalog: deps.catalog ?? createOpenRouterModelCatalogSource(upstream),
 	};
+	const fallbackTraceStore = createMemoryTraceStore();
 
-	const app = new Hono<{ Bindings: Env }>();
+	const traceDeps = (c: Context<{ Bindings: Bindings }>): TraceDeps => {
+		const env = c.env as Partial<Bindings> | undefined;
+		let waitUntil: TraceDeps["waitUntil"];
+		try {
+			const ctx = c.executionCtx;
+			waitUntil = (promise) => ctx.waitUntil(promise);
+		} catch {
+			// テスト等 ExecutionContext が無い環境では await する。
+		}
+		return {
+			store: deps.traceStore ?? createTraceStore(env) ?? fallbackTraceStore,
+			...(env?.TRACE_FINGERPRINT_SECRET
+				? { fingerprintSecret: env.TRACE_FINGERPRINT_SECRET }
+				: {}),
+			...(waitUntil ? { waitUntil } : {}),
+		};
+	};
+
+	const app = new Hono<{ Bindings: Bindings }>();
 
 	app.use("*", cors({ origin: "*", exposeHeaders: EXPOSED_HEADERS }));
 
 	app.get("/health", (c) => c.json({ status: "ok" }));
 
+	app.post("/api/v1/auto-router/inspect", (c) =>
+		handleInspect(c.req.raw, routing),
+	);
+	app.get("/api/v1/auto-router/traces/:traceId", (c) =>
+		handleGetTrace(c.req.raw, c.req.param("traceId"), traceDeps(c)),
+	);
+
 	for (const prefix of ["/api/v1", "/v1"]) {
 		app.post(`${prefix}/chat/completions`, (c) =>
-			handleChatCompletions(c.req.raw, { upstream, ...routing }),
+			handleChatCompletions(c.req.raw, {
+				upstream,
+				...routing,
+				trace: traceDeps(c),
+			}),
 		);
 		// 未対応の endpoint は黙って proxy せず明示的にエラーにする。
 		app.all(`${prefix}/*`, (c) => {

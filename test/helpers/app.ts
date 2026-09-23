@@ -10,6 +10,7 @@ import {
 	toRequirements,
 } from "../../src/semantic/detector";
 import type { JevFailureReason } from "../../src/semantic/jev-client";
+import { createMemoryTraceStore } from "../../src/trace/store";
 import { createFakeUpstream } from "./fake-upstream";
 
 export const UPSTREAM_BASE = "https://openrouter.test/api/v1";
@@ -104,10 +105,12 @@ export const createTestApp = (
 	const upstream = createFakeUpstream(options.respond);
 	const detector = fakeDetector(options.semantic);
 	const catalog = createStaticModelCatalog(options.profiles ?? MODEL_PROFILES);
+	const traceStore = createMemoryTraceStore();
 	const app = createApp({
 		upstream: { baseUrl: UPSTREAM_BASE, fetch: upstream.fetch },
 		detector,
 		catalog: { load: async () => catalog },
+		traceStore,
 	});
-	return { app, upstream, detector };
+	return { app, upstream, detector, traceStore };
 };

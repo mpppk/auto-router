@@ -5,5 +5,18 @@
 	"compatibility_date": "2026-09-23",
 	"observability": {
 		"enabled": true
+	},
+	"d1_databases": [
+		{
+			// routing trace の保存先 (#7)
+			"binding": "TRACES_DB",
+			"database_name": "auto-router-traces",
+			"database_id": "f17b80b6-1289-4fc1-b375-5af1eddfa435",
+			"migrations_dir": "migrations"
+		}
+	],
+	"triggers": {
+		// 期限切れ routing trace の削除
+		"crons": ["17 3 * * *"]
 	}
 }

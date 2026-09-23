@@ -38,9 +38,61 @@ op inject -i .env.template -o .env
 | `OPENROUTER_API_KEY` | 動作確認・e2e・eval 用。auto-router は BYOK なので Worker 自体は OpenRouter キーを持たない |
 | `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` | Wrangler CLI (deploy, D1 migration など) |
 
+Worker の secret:
+
+| 変数 | 用途 |
+| --- | --- |
+| `TRACE_FINGERPRINT_SECRET` | routing trace の所有者判定に使う API key HMAC の secret (`wrangler secret put TRACE_FINGERPRINT_SECRET`)。未設定時は SHA-256 fingerprint |
+
 `.env` は Bun と Wrangler が自動で読み込みます。`CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false` により、これらの値は Worker の binding には渡りません。
 
 Jev (semantic detector) は OpenRouter の `~typesafe/jev-latest` を呼び出し側の OpenRouter キーで利用するため、専用の API キーは不要です。
+
+## API
+
+OpenAI / OpenRouter 互換の base URL として `https://<host>/api/v1` を指定し、API key には caller 自身の OpenRouter API key を使います (BYOK)。
+
+| Endpoint | 内容 |
+| --- | --- |
+| `POST /api/v1/chat/completions` (`/v1/chat/completions`) | capability-aware routing 付き Chat Completions proxy |
+| `POST /api/v1/auto-router/inspect` | 同じ request の routing decision を返す。upstream model は呼ばない |
+| `GET /api/v1/auto-router/traces/:traceId` | 実行済み routing trace を返す (同じ API key からのみ取得可) |
+
+### Request headers
+
+| Header | Default | 内容 |
+| --- | --- | --- |
+| `Auto-Router-Allow-Model-Override` | `true` | caller の model chain で Hard Requirement を満たせない場合に capability default route へ置換してよいか。`false` なら `capability_not_supported` |
+| `Auto-Router-Debug` | `false` | `true` で詳細 trace (candidate ごとの conflict 詳細、tool_choice、provider 等) を保存 |
+
+### Response headers
+
+response body / SSE は変更せず、routing summary を header で返します。
+
+| Header | 内容 |
+| --- | --- |
+| `Auto-Router-Trace-Id` | `rt_...`。`GET /api/v1/auto-router/traces/:traceId` で参照 |
+| `Auto-Router-Requested-Model` | caller の model chain (`model` + `models`、`,` 区切り) |
+| `Auto-Router-Selected-Model` | upstream に送った effective model chain (`,` 区切り、先頭が primary) |
+| `Auto-Router-Route-Reason` | `requested_model` / `filtered_fallback_chain` / `capability_override` / `capability_not_supported` / `degraded` |
+| `Auto-Router-Degraded` | Jev 障害で semantic 判定ができなかった場合 `true` |
+
+### Errors
+
+`{ "error": { "message", "type", "code", "metadata"? } }`
+
+| code | status |
+| --- | --- |
+| `invalid_router_request` | 400 |
+| `missing_authorization` | 401 |
+| `unsupported_endpoint` / `trace_not_found` | 404 |
+| `capability_not_supported` / `capability_conflict` | 422 |
+
+### Routing trace
+
+- Cloudflare D1 (`TRACES_DB`, `migrations/`) に 7 日間保存し、cron trigger で期限切れを削除
+- raw Authorization / message 本文は保存しない。trace の所有者は API key の HMAC fingerprint (`TRACE_FINGERPRINT_SECRET`) で判定
+- migration は CI の deploy 前に `wrangler d1 migrations apply TRACES_DB --remote` で適用 (ローカルは `--local`)
 
 ## Eval
 
@@ -66,5 +118,5 @@ bun run eval:semantic --sweep    # required threshold を変えて比較
 
 デプロイには以下の GitHub Secrets が必要です。
 
-- `CLOUDFLARE_API_TOKEN` — "Edit Cloudflare Workers" テンプレートで作成した API Token
+- `CLOUDFLARE_API_TOKEN` — "Edit Cloudflare Workers" テンプレートで作成した API Token (D1 migration のため D1 Edit 権限も必要)
 - `CLOUDFLARE_ACCOUNT_ID`

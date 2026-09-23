@@ -51,4 +51,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           packageManager: bun
-          command: deploy --minify
+          # D1 migration (routing trace) を適用してから deploy する
+          command: |
+            d1 migrations apply TRACES_DB --remote
+            deploy --minify

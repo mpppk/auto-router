@@ -5,7 +5,7 @@ import {
 	detectStructuralRequirements,
 	type StructuralAnalysis,
 } from "../core/structural";
-import type { RoutingContext } from "../core/types";
+import type { RequestFeatures, RoutingContext } from "../core/types";
 import type { SemanticDetection, SemanticDetector } from "../semantic/detector";
 
 export interface RoutingDeps {
@@ -18,6 +18,7 @@ export interface RoutingDecision {
 	resolution: RouteResolution;
 	semantic: SemanticDetection;
 	structural: StructuralAnalysis;
+	features: RequestFeatures;
 	latencyMs: { jev?: number; routing: number };
 }
 
@@ -60,6 +61,7 @@ export const decideRoute = async (
 		resolution,
 		semantic,
 		structural,
+		features: input.context.features,
 		latencyMs: {
 			...(semantic.latencyMs !== undefined ? { jev: semantic.latencyMs } : {}),
 			routing: now() - started,
