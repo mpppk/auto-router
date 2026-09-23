@@ -42,6 +42,21 @@ op inject -i .env.template -o .env
 
 Jev (semantic detector) は OpenRouter の `~typesafe/jev-latest` を呼び出し側の OpenRouter キーで利用するため、専用の API キーは不要です。
 
+## Eval
+
+capability detector / routing の品質を gold dataset で評価します (#8)。
+
+```sh
+bun run eval:semantic            # Jev semantic detector を実際に呼んで評価 (要 OPENROUTER_API_KEY)
+bun run eval:semantic --cached   # cache 済みの probability だけで再評価 (API 呼び出しなし)
+bun run eval:semantic --threshold social.x.search=0.7,0.2   # capability ごとの threshold を変更
+bun run eval:semantic --sweep    # required threshold を変えて比較
+```
+
+- dataset: `eval/semantic-dataset.ts` (binary gold)
+- 指標: capability ごとの precision / recall / FPR / FNR / uncertain rate
+- Jev の結果は `eval/.cache/` に保存され、state や質問文が変わった case だけ再取得します
+
 ## CI/CD
 
 `.github/workflows/ci.yml`
