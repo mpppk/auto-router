@@ -20,8 +20,6 @@ export interface ServerToolRequirement {
 /** capability を満たす既定の実行route。MVP では1 model。 */
 export interface ExecutionRouteTemplate {
 	model: string;
-	/** route を実行できる provider。caller の provider 制約との両立判定に使う。 */
-	providers?: string[];
 }
 
 export interface CapabilityDefinition<C extends string = string> {
@@ -32,6 +30,8 @@ export interface CapabilityDefinition<C extends string = string> {
 	/** candidate model がこの capability を提供できるか。 */
 	support(modelId: string, profile: ModelProfile | undefined): Support;
 	serverTool?: ServerToolRequirement;
+	/** capability の実行に必要な provider (いずれか)。caller の provider 制約と両立しなければ conflict。 */
+	providers?: string[];
 	defaultRoute?: ExecutionRouteTemplate;
 }
 
@@ -113,9 +113,13 @@ export const SEMANTIC_REGISTRY: Record<
 		routing: "tool",
 		description: "Search the web for current or external information.",
 		// openrouter:web_search は tool calling 可能な model で利用できる。
-		support: hasParameter("tools"),
+		// default route の Grok は catalog が取得できなくても native search で対応する。
+		support: (modelId, profile) =>
+			isGrok4OrLater(modelId)
+				? "supported"
+				: hasParameter("tools")(modelId, profile),
 		serverTool: { type: WEB_SEARCH_TOOL_TYPE, parameters: {} },
-		defaultRoute: { model: DEFAULT_GROK_MODEL, providers: ["xai"] },
+		defaultRoute: { model: DEFAULT_GROK_MODEL },
 	},
 	"social.x.search": {
 		capability: "social.x.search",
@@ -131,7 +135,9 @@ export const SEMANTIC_REGISTRY: Record<
 				x_search: requireXSearchObject,
 			},
 		},
-		defaultRoute: { model: DEFAULT_GROK_MODEL, providers: ["xai"] },
+		// X Search は xAI の native search でのみ実行できる。
+		providers: ["xai"],
+		defaultRoute: { model: DEFAULT_GROK_MODEL },
 	},
 	"places.search": placesDefinition("places.search", "Search places / POIs."),
 	"places.opening_hours": placesDefinition(
