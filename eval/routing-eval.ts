@@ -6,6 +6,8 @@ import {
 	type ModelProfile,
 } from "../src/catalog/model-catalog";
 import {
+	applyCapabilityDegrades,
+	type Capability,
 	type Requirement,
 	SEMANTIC_CAPABILITIES,
 } from "../src/core/capabilities";
@@ -13,6 +15,10 @@ import { normalizeModelChain } from "../src/core/model-chain";
 import { allowsAnyProvider } from "../src/core/provider";
 import { SEMANTIC_REGISTRY, STRUCTURAL_REGISTRY } from "../src/core/registry";
 import { detectStructuralRequirements } from "../src/core/structural";
+import {
+	ALLOW_CAPABILITY_DEGRADE_HEADER,
+	parseCapabilityDegrades,
+} from "../src/http/router-options";
 import {
 	type SemanticDetector,
 	type ThresholdConfig,
@@ -365,19 +371,29 @@ export const runRoutingEval = async (
 		const context = chatCompletionsAdapter.extractRoutingContext(parsed);
 		const requestedChain =
 			chatCompletionsAdapter.getRequestedModelChain(parsed);
-		const hard: Requirement[] = [
-			...trace.semanticRequirements.flatMap((r) =>
+		// Hard Requirement は Jev の判定 (trace) に caller が header で許可した degrade だけを適用したもの。
+		const semanticHard = applyCapabilityDegrades(
+			trace.semanticRequirements.flatMap((r) =>
 				r.decision === "required"
 					? [
 							{
 								kind: "semantic" as const,
-								capability: r.capability as never,
+								capability: r.capability as Capability,
 								decision: r.decision,
 								requiredProbability: r.requiredProbability,
 							},
 						]
 					: [],
 			),
+			res.status === 400
+				? []
+				: parseCapabilityDegrades(
+						new Headers(c.headers),
+						ALLOW_CAPABILITY_DEGRADE_HEADER,
+					),
+		);
+		const hard: Requirement[] = [
+			...semanticHard.requirements,
 			...detectStructuralRequirements(context.features).requirements,
 		];
 

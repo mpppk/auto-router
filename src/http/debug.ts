@@ -24,6 +24,7 @@ export const handleInspect = async (
 			requestedChain: prepared.requestedChain,
 			allowModelOverride: prepared.options.allowModelOverride,
 			semantic: prepared.options.semantic,
+			capabilityDegrades: prepared.options.capabilityDegrades,
 			apiKey: prepared.apiKey,
 			signal: request.signal,
 		},

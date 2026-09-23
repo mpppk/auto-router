@@ -276,3 +276,114 @@ describe("semantic routing control headers", () => {
 		expect(upstream.requests).toHaveLength(0);
 	});
 });
+
+describe("Auto-Router-Allow-Capability-Degrade", () => {
+	const ramen = [
+		{ role: "user", content: "渋谷駅周辺でおすすめのラーメン屋を探して" },
+	];
+	const places = { "places.search": 0.95, "geo.proximity": 0.9 };
+	const DEGRADE = "places.search=web.search, geo.proximity=web.search";
+
+	test("without opt-in Places stays 422", async () => {
+		const { res } = await send(
+			{ model: "anthropic/claude-sonnet-5", messages: ramen },
+			{ semantic: places },
+		);
+		expect(res.status).toBe(422);
+	});
+
+	test("opt-in degrades Places to web search and says so", async () => {
+		const { res, forwarded } = await send(
+			{ model: "anthropic/claude-sonnet-5", messages: ramen },
+			{
+				semantic: places,
+				headers: { "Auto-Router-Allow-Capability-Degrade": DEGRADE },
+			},
+		);
+		expect(res.status).toBe(200);
+		expect(forwarded).toEqual({
+			model: "anthropic/claude-sonnet-5",
+			messages: ramen,
+			tools: [{ type: "openrouter:web_search" }],
+		});
+		expect(res.headers.get("Auto-Router-Route-Reason")).toBe("requested_model");
+		expect(res.headers.get("Auto-Router-Degraded-Capabilities")).toBe(
+			"places.search=web.search,geo.proximity=web.search",
+		);
+	});
+
+	test("all required Places capabilities must be allowed to degrade", async () => {
+		const { res } = await send(
+			{ model: "anthropic/claude-sonnet-5", messages: ramen },
+			{
+				semantic: places,
+				headers: {
+					"Auto-Router-Allow-Capability-Degrade": "places.search=web.search",
+				},
+			},
+		);
+		expect(res.status).toBe(422);
+		expect(res.headers.get("Auto-Router-Degraded-Capabilities")).toBe(
+			"places.search=web.search",
+		);
+	});
+
+	test("an explicit Google Maps source is never degraded", async () => {
+		const { res } = await send(
+			{ model: "anthropic/claude-sonnet-5", messages: ramen },
+			{
+				semantic: { "places.reviews": 0.95, "source.google_maps": 0.95 },
+				headers: {
+					"Auto-Router-Allow-Capability-Degrade": "places.reviews=web.search",
+				},
+			},
+		);
+		expect(res.status).toBe(422);
+		expect(await res.json()).toMatchObject({
+			error: {
+				code: "capability_not_supported",
+				// places.reviews は web.search に置き換わるが Google Maps は残る
+				metadata: {
+					required_capabilities: ["source.google_maps", "web.search"],
+				},
+			},
+		});
+	});
+
+	test("not applied when the capability is not required", async () => {
+		const { res, forwarded } = await send(
+			{ model: "anthropic/claude-sonnet-5", messages: ramen },
+			{
+				semantic: { "places.search": 0.5 },
+				headers: { "Auto-Router-Allow-Capability-Degrade": DEGRADE },
+			},
+		);
+		expect(res.headers.get("Auto-Router-Degraded-Capabilities")).toBeNull();
+		expect(forwarded).toEqual({
+			model: "anthropic/claude-sonnet-5",
+			messages: ramen,
+		});
+	});
+
+	test.each([
+		"source.google_maps=web.search",
+		"places.search=social.x.search",
+		"places.search",
+		"places.search=web.search=x",
+		"places.search=web.search,places.search=web.search",
+		"unknown=web.search",
+	])("invalid value %p → invalid_router_request", async (value) => {
+		const { res, detector } = await send(
+			{ model: "anthropic/claude-sonnet-5", messages: ramen },
+			{ headers: { "Auto-Router-Allow-Capability-Degrade": value } },
+		);
+		expect(res.status).toBe(400);
+		expect(await res.json()).toMatchObject({
+			error: {
+				code: "invalid_router_request",
+				metadata: { header: "Auto-Router-Allow-Capability-Degrade" },
+			},
+		});
+		expect(detector.calls).toBe(0);
+	});
+});

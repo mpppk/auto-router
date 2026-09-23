@@ -11,6 +11,26 @@ export const SEMANTIC_CAPABILITIES = [
 
 export type Capability = (typeof SEMANTIC_CAPABILITIES)[number];
 
+/** caller が明示的に許可した capability の置き換え (#25)。 */
+export interface CapabilityDegrade {
+	from: Capability;
+	to: Capability;
+}
+
+/**
+ * opt-in で degrade してよい組み合わせ。
+ * Places 系は通常の Web Search でも実用的に答えられることが多いため `web.search` への degrade を許可する。
+ * `source.google_maps` は source 指定が明確 (Google Maps のデータが必要) なので degrade 対象外。
+ */
+export const ALLOWED_CAPABILITY_DEGRADES: Partial<
+	Record<Capability, readonly Capability[]>
+> = {
+	"places.search": ["web.search"],
+	"places.opening_hours": ["web.search"],
+	"places.reviews": ["web.search"],
+	"geo.proximity": ["web.search"],
+};
+
 /** request 構造から決定的に抽出する capability。 */
 export const STRUCTURAL_CAPABILITIES = [
 	"input.image",
@@ -64,3 +84,38 @@ export const hardRequirements = (
 export const capabilitiesOf = (requirements: readonly Requirement[]) => [
 	...new Set(requirements.map((r) => r.capability)),
 ];
+
+/**
+ * caller が許可した degrade を semantic requirements に適用する。
+ * required な `from` を取り除き、代わりに `to` を required にする (確率は `from` と既存の `to` の大きい方)。
+ * required でない `from` や、許可されていない capability には何もしない。
+ */
+export const applyCapabilityDegrades = (
+	requirements: readonly SemanticRequirement[],
+	degrades: readonly CapabilityDegrade[],
+): { requirements: SemanticRequirement[]; applied: CapabilityDegrade[] } => {
+	const applied = degrades.filter((d) =>
+		requirements.some(
+			(r) => r.capability === d.from && r.decision === "required",
+		),
+	);
+	if (applied.length === 0) return { requirements: [...requirements], applied };
+
+	const from = new Set(applied.map((d) => d.from));
+	const result = requirements.filter((r) => !from.has(r.capability));
+	for (const d of applied) {
+		const source = requirements.find((r) => r.capability === d.from);
+		const p = source?.requiredProbability ?? 1;
+		const index = result.findIndex((r) => r.capability === d.to);
+		const existing = result[index];
+		const upgraded: SemanticRequirement = {
+			kind: "semantic",
+			capability: d.to,
+			decision: "required",
+			requiredProbability: Math.max(p, existing?.requiredProbability ?? 0),
+		};
+		if (existing === undefined) result.push(upgraded);
+		else result[index] = upgraded;
+	}
+	return { requirements: result, applied };
+};

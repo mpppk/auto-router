@@ -1,4 +1,9 @@
-import { type Capability, SEMANTIC_CAPABILITIES } from "../core/capabilities";
+import {
+	ALLOWED_CAPABILITY_DEGRADES,
+	type Capability,
+	type CapabilityDegrade,
+	SEMANTIC_CAPABILITIES,
+} from "../core/capabilities";
 import { RouterError } from "../core/errors";
 
 /**
@@ -16,6 +21,8 @@ export interface RouterOptions {
 	/** 詳細traceを保持するか。 */
 	debug: boolean;
 	semantic: SemanticOptions;
+	/** caller が明示的に許可した capability の degrade (例: places.search → web.search)。 */
+	capabilityDegrades: CapabilityDegrade[];
 }
 
 export interface SemanticOptions {
@@ -29,6 +36,8 @@ export const ALLOW_MODEL_OVERRIDE_HEADER = "Auto-Router-Allow-Model-Override";
 export const DEBUG_HEADER = "Auto-Router-Debug";
 export const SEMANTIC_HEADER = "Auto-Router-Semantic";
 export const CAPABILITIES_HEADER = "Auto-Router-Capabilities";
+export const ALLOW_CAPABILITY_DEGRADE_HEADER =
+	"Auto-Router-Allow-Capability-Degrade";
 
 export const invalidHeader = (name: string, message: string) =>
 	new RouterError("invalid_router_request", message, { header: name });
@@ -109,6 +118,44 @@ export const parseCapabilityList = (
 	return [...new Set(items as Capability[])];
 };
 
+/** `from=to` の一覧として parse する。許可されていない組み合わせは不正。 */
+export const parseCapabilityDegrades = (
+	headers: Headers,
+	name: string,
+): CapabilityDegrade[] => {
+	const items = parseListHeader(headers, name);
+	if (items === undefined) return [];
+	const degrades = items.map((item): CapabilityDegrade => {
+		const [from, to, ...rest] = item.split("=").map((part) => part.trim());
+		const allowed =
+			rest.length === 0 &&
+			from !== undefined &&
+			to !== undefined &&
+			isCapability(from) &&
+			isCapability(to) &&
+			(ALLOWED_CAPABILITY_DEGRADES[from] ?? []).includes(to);
+		if (!allowed) {
+			throw invalidHeader(
+				name,
+				`Header \`${name}\` has an unsupported degrade "${item}". Supported: ${Object.entries(
+					ALLOWED_CAPABILITY_DEGRADES,
+				)
+					.flatMap(([f, ts]) => ts.map((t) => `${f}=${t}`))
+					.join(", ")}`,
+			);
+		}
+		return { from, to };
+	});
+	const froms = degrades.map((d) => d.from);
+	if (new Set(froms).size !== froms.length) {
+		throw invalidHeader(
+			name,
+			`Header \`${name}\` has duplicate capabilities: ${froms.join(", ")}.`,
+		);
+	}
+	return degrades;
+};
+
 export const parseRouterOptions = (headers: Headers): RouterOptions => {
 	const capabilities = parseCapabilityList(headers, CAPABILITIES_HEADER);
 	return {
@@ -122,5 +169,9 @@ export const parseRouterOptions = (headers: Headers): RouterOptions => {
 			enabled: parseOnOffHeader(headers, SEMANTIC_HEADER, true),
 			...(capabilities !== undefined ? { capabilities } : {}),
 		},
+		capabilityDegrades: parseCapabilityDegrades(
+			headers,
+			ALLOW_CAPABILITY_DEGRADE_HEADER,
+		),
 	};
 };

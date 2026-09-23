@@ -116,6 +116,7 @@ export const handleChatCompletions = async (
 			requestedChain,
 			allowModelOverride: prepared.options.allowModelOverride,
 			semantic: prepared.options.semantic,
+			capabilityDegrades: prepared.options.capabilityDegrades,
 			apiKey: prepared.apiKey,
 			signal: request.signal,
 		},

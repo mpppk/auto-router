@@ -570,4 +570,64 @@ export const ROUTING_GOLD_DATASET: RoutingGoldCase[] = [
 		defaultRouteModels: ["x-ai/grok-3", TEXT_ONLY],
 		expected: { error: "capability_not_supported" },
 	},
+
+	// --- Places degrade opt-in (#25) ---
+	{
+		id: "places-degrade-opt-in-web-search",
+		tags: ["places", "degrade"],
+		request: {
+			model: CLAUDE,
+			messages: [
+				{ role: "user", content: "渋谷駅周辺でおすすめのラーメン屋を探して" },
+			],
+		},
+		semantic: { "places.search": 0.95, "geo.proximity": 0.9 },
+		headers: {
+			"Auto-Router-Allow-Capability-Degrade":
+				"places.search=web.search,geo.proximity=web.search",
+		},
+		expected: { effectiveChain: [CLAUDE], reason: "requested_model" },
+	},
+	{
+		id: "places-degrade-without-tools-overrides",
+		tags: ["places", "degrade"],
+		request: {
+			model: TEXT_ONLY,
+			messages: [{ role: "user", content: "新宿で今開いているカフェを教えて" }],
+		},
+		semantic: { "places.search": 0.95, "places.opening_hours": 0.95 },
+		headers: {
+			"Auto-Router-Allow-Capability-Degrade":
+				"places.search=web.search,places.opening_hours=web.search",
+		},
+		expected: { effectiveChain: DEFAULT_ROUTE, reason: "capability_override" },
+	},
+	{
+		id: "places-degrade-partial-opt-in-not-supported",
+		tags: ["places", "degrade"],
+		request: {
+			model: CLAUDE,
+			messages: [{ role: "user", content: "新宿で今開いているカフェを教えて" }],
+		},
+		semantic: { "places.search": 0.95, "places.opening_hours": 0.95 },
+		headers: {
+			"Auto-Router-Allow-Capability-Degrade": "places.search=web.search",
+		},
+		expected: { error: "capability_not_supported" },
+	},
+	{
+		id: "places-degrade-google-maps-source-not-degraded",
+		tags: ["places", "degrade"],
+		request: {
+			model: CLAUDE,
+			messages: [
+				{ role: "user", content: "Google Mapsの口コミでこの2店舗を比較して" },
+			],
+		},
+		semantic: { "source.google_maps": 0.95, "places.reviews": 0.95 },
+		headers: {
+			"Auto-Router-Allow-Capability-Degrade": "places.reviews=web.search",
+		},
+		expected: { error: "capability_not_supported" },
+	},
 ];
