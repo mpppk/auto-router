@@ -8,13 +8,14 @@
 		"dev": "wrangler dev",
 		"deploy": "wrangler deploy --minify",
 		"cf-typegen": "wrangler types",
-		"typecheck": "tsc -p . && tsc -p test",
+		"typecheck": "tsc -p . && tsc -p test && tsc -p eval",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"format": "biome format --write .",
 		"test": "bun test",
 		"check:types": "wrangler types --check",
-		"build": "wrangler deploy --dry-run --outdir dist"
+		"build": "wrangler deploy --dry-run --outdir dist",
+		"eval:semantic": "bun eval/run-semantic.ts"
 	},
 	"dependencies": {
 		"hono": "^4.13.8"
