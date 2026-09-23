@@ -38,7 +38,10 @@ const DROPPED_REQUEST_HEADER_PREFIXES = ["auto-router-", "cf-", "x-forwarded-"];
  * Authorization (BYOK) と HTTP-Referer / X-Title 等の OpenRouter 向けheaderは透過し、
  * `Auto-Router-*` は送らない。
  */
-export const buildUpstreamHeaders = (incoming: Headers): Headers => {
+export const buildUpstreamHeaders = (
+	incoming: Headers,
+	options: { json?: boolean } = { json: true },
+): Headers => {
 	const headers = new Headers();
 	incoming.forEach((value, key) => {
 		const name = key.toLowerCase();
@@ -48,7 +51,11 @@ export const buildUpstreamHeaders = (incoming: Headers): Headers => {
 		}
 		headers.set(key, value);
 	});
-	headers.set("content-type", "application/json");
+	if (options.json) {
+		headers.set("content-type", "application/json");
+	} else {
+		headers.delete("content-type");
+	}
 	return headers;
 };
 
@@ -73,6 +80,23 @@ export const forwardToOpenRouter = (
 		method: "POST",
 		headers: buildUpstreamHeaders(incomingHeaders),
 		body,
+		signal,
+	});
+
+/**
+ * body の無い GET request (`/models` 等) を OpenRouter へ透過する。
+ * query string と Authorization 等の header はそのまま渡す。
+ */
+export const forwardGetToOpenRouter = (
+	config: UpstreamConfig,
+	path: string,
+	search: string,
+	incomingHeaders: Headers,
+	signal?: AbortSignal,
+): Promise<Response> =>
+	config.fetch(`${config.baseUrl}${path}${search}`, {
+		method: "GET",
+		headers: buildUpstreamHeaders(incomingHeaders, { json: false }),
 		signal,
 	});
 
