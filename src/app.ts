@@ -12,6 +12,10 @@ import { handleGetTrace, handleInspect } from "./http/debug";
 import { enforceRateLimit, type RateLimiter } from "./http/rate-limit";
 import type { RoutingDeps } from "./routing/decide";
 import {
+	createCacheApiSemanticCache,
+	type SemanticCache,
+} from "./semantic/cache";
+import {
 	createSemanticDetector,
 	type SemanticDetector,
 } from "./semantic/detector";
@@ -37,6 +41,8 @@ export type Bindings = Env & {
 export interface AppDeps {
 	upstream?: Partial<UpstreamConfig>;
 	detector?: SemanticDetector;
+	/** Jev 判定の cache。指定しない場合は Workers Cache API (無ければ cache しない)。 */
+	semanticCache?: SemanticCache;
 	catalog?: ModelCatalogSource;
 	/** 指定しない場合は `TRACES_DB` binding (無ければ in-memory) を使う。 */
 	traceStore?: TraceStore;
@@ -67,8 +73,32 @@ export const createApp = (deps: AppDeps = {}) => {
 		baseUrl: deps.upstream?.baseUrl ?? DEFAULT_OPENROUTER_BASE_URL,
 		fetch: deps.upstream?.fetch ?? ((input, init) => fetch(input, init)),
 	};
-	const detector =
-		deps.detector ?? createSemanticDetector({ jev: createJevClient(upstream) });
+	const jev = createJevClient(upstream);
+	// cache key の fingerprint secret は env にあるため、isolate ごとに1回だけ作る。
+	let cachedDetector: SemanticDetector | undefined;
+	const detectorFor = (env: Partial<Bindings> | undefined) => {
+		if (deps.detector) return deps.detector;
+		if (cachedDetector) return cachedDetector;
+		const store =
+			deps.semanticCache ??
+			(typeof caches !== "undefined"
+				? createCacheApiSemanticCache(caches.default)
+				: undefined);
+		cachedDetector = createSemanticDetector({
+			jev,
+			...(store
+				? {
+						cache: {
+							store,
+							...(env?.TRACE_FINGERPRINT_SECRET
+								? { fingerprintSecret: env.TRACE_FINGERPRINT_SECRET }
+								: {}),
+						},
+					}
+				: {}),
+		});
+		return cachedDetector;
+	};
 	// isolate 内 cache を request 間で共有するため、source は isolate ごとに1つだけ作る。
 	let directCatalog: ModelCatalogSource | undefined;
 	let kvCatalog: ModelCatalogSource | undefined;
@@ -88,7 +118,7 @@ export const createApp = (deps: AppDeps = {}) => {
 			deps.defaultRouteModels ??
 			parseModelList("DEFAULT_ROUTE_MODELS", env?.DEFAULT_ROUTE_MODELS);
 		return {
-			detector,
+			detector: detectorFor(env),
 			catalog: catalogFor(env),
 			...(defaultRouteModels ? { defaultRouteModels } : {}),
 		};

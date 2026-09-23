@@ -31,6 +31,8 @@ export interface RoutingTrace {
 	};
 
 	semanticStatus: "ok" | "skipped" | "degraded" | "disabled";
+	/** Jev 判定 cache の結果 (cache 有効時のみ)。hit なら Jev を呼んでいない。 */
+	semanticCache?: "hit" | "miss";
 	/** `Auto-Router-Capabilities` で判定対象を限定した場合のみ。 */
 	semanticScope?: string[];
 	/**
@@ -180,6 +182,7 @@ export const buildRoutingTrace = (input: {
 			agentLoopTurns: decision.agentLoopTurns,
 		},
 		semanticStatus: semantic.status,
+		...(semantic.cache ? { semanticCache: semantic.cache } : {}),
 		...(decision.semanticScope
 			? { semanticScope: decision.semanticScope }
 			: {}),
@@ -226,7 +229,9 @@ export const buildRoutingTrace = (input: {
 					: {}),
 		},
 		billing: {
-			jev: semantic.status === "ok" || semantic.status === "degraded",
+			jev:
+				(semantic.status === "ok" || semantic.status === "degraded") &&
+				semantic.cache !== "hit",
 			// error で upstream に送らない場合は server tool も実行されない。
 			serverTools:
 				resolution.plan === undefined
