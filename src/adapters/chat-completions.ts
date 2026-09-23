@@ -3,7 +3,8 @@ import {
 	normalizeModelChain,
 	type RequestedModelChain,
 } from "../core/model-chain";
-import type { ConversationMessage } from "../core/types";
+import type { ProviderPreferences } from "../core/provider";
+import type { ContentPartRef, ConversationMessage } from "../core/types";
 import type { EndpointAdapter } from "./endpoint-adapter";
 
 /**
@@ -14,6 +15,8 @@ export type ChatCompletionsRequest = Record<string, unknown> & {
 	model?: string;
 	models?: string[];
 	messages: unknown[];
+	tools?: unknown[];
+	provider?: ProviderPreferences;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -59,14 +62,35 @@ export const chatCompletionsAdapter: EndpointAdapter<ChatCompletionsRequest> = {
 		if (!Array.isArray(messages)) {
 			throw invalid("`messages` must be an array.", "messages");
 		}
+		if (body.tools !== undefined && !Array.isArray(body.tools)) {
+			throw invalid("`tools` must be an array.", "tools");
+		}
+		if (body.provider !== undefined && !isRecord(body.provider)) {
+			throw invalid("`provider` must be an object.", "provider");
+		}
 		return body as ChatCompletionsRequest;
 	},
 
 	extractRoutingContext(request) {
 		const conversation: ConversationMessage[] = [];
 		const instructions: string[] = [];
-		for (const message of request.messages) {
+		const contentParts: ContentPartRef[] = [];
+		for (const [i, message] of request.messages.entries()) {
 			if (!isRecord(message)) continue;
+			if (Array.isArray(message.content)) {
+				for (const [j, part] of message.content.entries()) {
+					if (
+						isRecord(part) &&
+						typeof part.type === "string" &&
+						part.type !== "text"
+					) {
+						contentParts.push({
+							type: part.type,
+							path: `messages[${i}].content[${j}]`,
+						});
+					}
+				}
+			}
 			const text = extractText(message.content).trim();
 			if (text === "") continue;
 			switch (message.role) {
@@ -81,7 +105,20 @@ export const chatCompletionsAdapter: EndpointAdapter<ChatCompletionsRequest> = {
 				// tool / function 等の結果は semantic routing context に含めない。
 			}
 		}
-		return { conversation, instructions };
+		return {
+			conversation,
+			instructions,
+			features: {
+				contentParts,
+				tools: request.tools,
+				toolChoice: request.tool_choice,
+				responseFormat: request.response_format,
+				reasoning: request.reasoning,
+				reasoningEffort: request.reasoning_effort,
+				includeReasoning: request.include_reasoning,
+				provider: request.provider,
+			},
+		};
 	},
 
 	getRequestedModelChain(request): RequestedModelChain {
