@@ -19,13 +19,18 @@ import {
 } from "../src/core/capabilities";
 import { buildSemanticContext, toJevState } from "../src/semantic/context";
 import {
+	classify,
 	DEFAULT_THRESHOLD,
 	type Threshold,
 	type ThresholdConfig,
 	thresholdFor,
 } from "../src/semantic/detector";
 import { createJevClient } from "../src/semantic/jev-client";
-import { CAPABILITY_QUESTIONS } from "../src/semantic/questions";
+import {
+	CAPABILITY_QUESTIONS,
+	FOCUSED_QUESTIONS,
+	focusedQuestionId,
+} from "../src/semantic/questions";
 import { DEFAULT_OPENROUTER_BASE_URL } from "../src/upstream/openrouter";
 import { computeMetrics, formatRate, type Observation } from "./metrics";
 import { SEMANTIC_GOLD_DATASET } from "./semantic-dataset";
@@ -58,8 +63,12 @@ const loadCache = async (): Promise<Cache> => {
 	}
 };
 
+// context-aware 版と最新メッセージ中心版 (#44) を同一 call で評価する。
 const questions = Object.fromEntries(
-	SEMANTIC_CAPABILITIES.map((c) => [c, CAPABILITY_QUESTIONS[c]]),
+	SEMANTIC_CAPABILITIES.flatMap((c) => [
+		[c, CAPABILITY_QUESTIONS[c]],
+		[focusedQuestionId(c), FOCUSED_QUESTIONS[c]],
+	]),
 );
 
 const collectProbabilities = async (): Promise<Cache> => {
@@ -112,14 +121,31 @@ const collectProbabilities = async (): Promise<Cache> => {
 	return cache;
 };
 
+// detector と同じ escalation 則 (#44): full が uncertain の枠だけ focused で上書きする。
 const toObservations = (cache: Cache): Observation[] =>
 	SEMANTIC_GOLD_DATASET.flatMap((c) =>
-		Object.entries(c.expected).map(([capability, gold]) => ({
-			caseId: c.id,
-			capability: capability as Capability,
-			gold: gold === true,
-			probability: cache[c.id]?.probabilities[capability] ?? Number.NaN,
-		})),
+		Object.entries(c.expected).map(([capability, gold]) => {
+			const cap = capability as Capability;
+			const probabilities = cache[c.id]?.probabilities ?? {};
+			const threshold = thresholdFor(cap, thresholds);
+			const full = probabilities[cap] ?? Number.NaN;
+			let probability = full;
+			if (classify(full, threshold) === "uncertain") {
+				const focused = probabilities[focusedQuestionId(cap)];
+				if (
+					focused !== undefined &&
+					classify(focused, threshold) === "required"
+				) {
+					probability = focused;
+				}
+			}
+			return {
+				caseId: c.id,
+				capability: cap,
+				gold: gold === true,
+				probability,
+			};
+		}),
 	);
 
 const printTable = (

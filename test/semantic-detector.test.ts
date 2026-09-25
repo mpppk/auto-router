@@ -11,6 +11,8 @@ import {
 	classify,
 	createSemanticDetector,
 	DEFAULT_THRESHOLD,
+	mergeFocusedRequirements,
+	splitProbabilities,
 	toRequirements,
 } from "../src/semantic/detector";
 import { type JevClient, JevError } from "../src/semantic/jev-client";
@@ -136,6 +138,93 @@ describe("toRequirements", () => {
 	});
 });
 
+describe("splitProbabilities / mergeFocusedRequirements", () => {
+	test("splits full and focused probabilities by question id", () => {
+		expect(
+			splitProbabilities({ "web.search": 0.7, "web.search:focused": 0.9 }, [
+				"web.search",
+				"social.x.search",
+			]),
+		).toEqual({ full: { "web.search": 0.7 }, focused: { "web.search": 0.9 } });
+	});
+
+	test("uncertain + focused required → required with the focused probability", () => {
+		expect(
+			mergeFocusedRequirements(toRequirements({ "social.x.search": 0.77 }), {
+				"social.x.search": 0.88,
+			}),
+		).toEqual([
+			{
+				kind: "semantic",
+				capability: "social.x.search",
+				requiredProbability: 0.88,
+				decision: "required",
+			},
+		]);
+	});
+
+	test("uncertain stays when focused is uncertain or not_required", () => {
+		for (const fp of [0.7, 0.1]) {
+			const [req] = mergeFocusedRequirements(
+				toRequirements({ "web.search": 0.5 }),
+				{ "web.search": fp },
+			);
+			expect(req?.decision).toBe("uncertain");
+			expect(req?.requiredProbability).toBe(0.5);
+		}
+	});
+
+	test("decisive full results are untouched even if focused disagrees", () => {
+		const reqs = mergeFocusedRequirements(
+			toRequirements({ "web.search": 0.95, "social.x.search": 0.05 }),
+			{ "web.search": 0.05, "social.x.search": 0.95 },
+		);
+		expect(reqs).toEqual([
+			{
+				kind: "semantic",
+				capability: "social.x.search",
+				requiredProbability: 0.05,
+				decision: "not_required",
+			},
+			{
+				kind: "semantic",
+				capability: "web.search",
+				requiredProbability: 0.95,
+				decision: "required",
+			},
+		]);
+	});
+
+	test("missing focused probability keeps uncertain", () => {
+		const [req] = mergeFocusedRequirements(
+			toRequirements({ "web.search": 0.5 }),
+			{},
+		);
+		expect(req?.decision).toBe("uncertain");
+	});
+
+	test("detector escalates uncertain slots via focused questions", async () => {
+		const jev = fakeJev(async (_state, questions) =>
+			Object.fromEntries(
+				Object.keys(questions).map((id) => [
+					id,
+					id.endsWith(":focused") ? 0.88 : 0.77,
+				]),
+			),
+		);
+		const detector = createSemanticDetector({ jev });
+		const result = await detector.detect(conversation, { apiKey: "k" });
+		expect(result.status).toBe("ok");
+		// 全 capability が uncertain → required に上書きされる
+		expect(result.requirements.every((r) => r.decision === "required")).toBe(
+			true,
+		);
+		expect(
+			result.requirements.every((r) => r.requiredProbability === 0.88),
+		).toBe(true);
+	});
+});
+
 const fakeJev = (impl: JevClient["noul"]): JevClient & { calls: unknown[] } => {
 	const calls: unknown[] = [];
 	return {
@@ -196,7 +285,10 @@ describe("createSemanticDetector", () => {
 		});
 
 		const call = jev.calls[0] as { questions: Record<string, unknown> };
-		expect(Object.keys(call.questions)).toEqual(["web.search"]);
+		expect(Object.keys(call.questions)).toEqual([
+			"web.search",
+			"web.search:focused",
+		]);
 		expect(result.requirements.map((r) => r.capability)).toEqual([
 			"web.search",
 		]);

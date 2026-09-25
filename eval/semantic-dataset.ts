@@ -19,6 +19,12 @@ const assistant = (text: string): ConversationMessage => ({
 	text,
 });
 
+/**
+ * 検索方針に触れない長い system prompt (#44 の希釈再現用、約2600字)。
+ * coding agent ハーネスの定型指示を模している。
+ */
+const LONG_SYSTEM_PROMPT = `You are pi, a coding assistant operating inside a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files. Available tools: read (read file contents, supports text and images), bash (execute shell commands, ls, grep, find), edit (precise file edits with exact text replacement, multiple disjoint edits in one call), write (create or overwrite files). Guidelines: use bash for file operations; use read to examine files instead of cat or sed; inspect PI_* environment variables for session details; use edit for precise changes where oldText must match exactly; when changing multiple locations use one edit call with multiple entries; keep oldText small but unique; use write only for new files or complete rewrites; be concise; show file paths clearly. When a skill file references a relative path, resolve it against the skill directory. Specialized skills available: agents-sdk for Cloudflare Workers agents, durable objects, workflows, queues, scheduled tasks, MCP servers, chat applications, voice agents, browser automation. bun-cli-webui for CLI plus Web UI single binary tools with oRPC, SQLite, Drizzle, React, Tailwind. cloudflare platform skill for Workers, Pages, KV, D1, R2, AI, Vectorize, Tunnel, WAF, Terraform. cloudflare-email-service for transactional email via Workers binding or REST API, SPF, DKIM, DMARC. cloudflare-one for Zero Trust SASE, Access, Gateway, WARP, DLP, CASB. computer-use via orca-cli for OS level inspection. cosense-task-protocol for task management with claim protocol across agent sessions. find-skills for discovering installable skills. gyazo-cli for screenshots. issue-claim-protocol for parallel GitHub issue processing with draft PR claims. orca and orchestration for multi-agent coordination with threaded messages and task DAGs. orca-cli for worktrees, terminals, repos, automations, artifacts. sandbox skills for Cloudflare Sandbox apps. setup-gh-pub-repo for public repo creation. turnstile-spin for bot protection. web-perf for Core Web Vitals audits with Chrome DevTools MCP. workers-best-practices for production Workers code review. wrangler CLI for deploys, D1, KV, R2, queues, workflows, secrets. Always load the relevant skill file when the task matches. Session management: compaction, checkpoints, trust, permissions. Ask before destructive operations. Verify with tests and typechecks after changes. Keep responses focused and actionable. Report file paths and test results clearly. Use Japanese when the user writes Japanese. Prefer minimal diffs. Run lint and format checks. Commit messages follow conventional commits style.`;
+
 const X_SEARCH_TURN = [
 	user("Xで今Claude Codeについてどんな反応がありますか？"),
 	assistant(
@@ -500,5 +506,37 @@ export const SEMANTIC_GOLD_DATASET: SemanticGoldCase[] = [
 		],
 		conversation: [user("日本で一番高い山の標高は？")],
 		expected: { "web.search": true, "social.x.search": false },
+	},
+
+	// --- 長い system prompt による希釈 (#44) ---
+	// 検索方針に触れない長い指示。context-aware 版が threshold 割れしても
+	// 最新メッセージ中心の再判定で required に戻ることを期待する。
+	{
+		id: "longsys-x-search",
+		tags: ["system", "dilution", "x"],
+		instructions: [LONG_SYSTEM_PROMPT],
+		conversation: [
+			user("こんにちは"),
+			assistant("こんにちは！何かお手伝いできることはありますか？"),
+			user("XでOpus5.5についての話題を調べて"),
+		],
+		expected: { "social.x.search": true },
+	},
+	{
+		id: "longsys-greeting",
+		tags: ["system", "dilution"],
+		instructions: [LONG_SYSTEM_PROMPT],
+		conversation: [user("こんにちは")],
+		expected: { "social.x.search": false, "web.search": false },
+	},
+	{
+		id: "longsys-x-summarize-results",
+		tags: ["system", "dilution", "x"],
+		instructions: [LONG_SYSTEM_PROMPT],
+		conversation: [
+			...X_SEARCH_TURN,
+			user("さっきの結果を箇条書きにまとめ直して"),
+		],
+		expected: { "social.x.search": false },
 	},
 ];

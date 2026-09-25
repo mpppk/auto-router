@@ -20,7 +20,11 @@ import {
 	JevError,
 	type JevFailureReason,
 } from "./jev-client";
-import { CAPABILITY_QUESTIONS } from "./questions";
+import {
+	CAPABILITY_QUESTIONS,
+	FOCUSED_QUESTIONS,
+	focusedQuestionId,
+} from "./questions";
 
 export interface Threshold {
 	/** p >= required → required */
@@ -113,6 +117,45 @@ export const toRequirements = (
 		];
 	});
 
+/** question id → capability の probability に分割する。focused 版の key が無ければ空になる。 */
+export const splitProbabilities = (
+	probabilities: Record<string, number>,
+	targets: readonly Capability[],
+): {
+	full: Partial<Record<Capability, number>>;
+	focused: Partial<Record<Capability, number>>;
+} => {
+	const full: Partial<Record<Capability, number>> = {};
+	const focused: Partial<Record<Capability, number>> = {};
+	for (const c of targets) {
+		const p = probabilities[c];
+		if (p !== undefined) full[c] = p;
+		const fp = probabilities[focusedQuestionId(c)];
+		if (fp !== undefined) focused[c] = fp;
+	}
+	return { full, focused };
+};
+
+/**
+ * context-aware 版が uncertain の枠だけ focused 版で上書きする (#44)。
+ * required / not_required が確定した枠は触らない。
+ * 上書き時は判定の根拠になった focused 側の確率を記録する。
+ */
+export const mergeFocusedRequirements = (
+	full: SemanticRequirement[],
+	focused: Partial<Record<Capability, number>>,
+	thresholds: ThresholdConfig = {},
+): SemanticRequirement[] =>
+	full.map((r) => {
+		if (r.decision !== "uncertain") return r;
+		const fp = focused[r.capability];
+		if (fp === undefined) return r;
+		if (classify(fp, thresholdFor(r.capability, thresholds)) !== "required") {
+			return r;
+		}
+		return { ...r, decision: "required" as const, requiredProbability: fp };
+	});
+
 export const createSemanticDetector = (
 	options: SemanticDetectorOptions,
 ): SemanticDetector => {
@@ -133,8 +176,12 @@ export const createSemanticDetector = (
 			if (targets.length === 0) {
 				return { status: "disabled", requirements: [], messagesUsed: 0 };
 			}
+			// context-aware 版と最新メッセージ中心版 (#44) を同一 call で評価する。
 			const questions = Object.fromEntries(
-				targets.map((c) => [c, CAPABILITY_QUESTIONS[c]]),
+				targets.flatMap((c) => [
+					[c, CAPABILITY_QUESTIONS[c]],
+					[focusedQuestionId(c), FOCUSED_QUESTIONS[c]],
+				]),
 			);
 
 			const started = now();
@@ -154,10 +201,18 @@ export const createSemanticDetector = (
 				cacheKey === undefined
 					? undefined
 					: await options.cache?.store.get(cacheKey).catch(() => undefined);
-			if (cached !== undefined && targets.every((c) => c in cached)) {
+			if (
+				cached !== undefined &&
+				targets.every((c) => c in cached && focusedQuestionId(c) in cached)
+			) {
+				const { full, focused } = splitProbabilities(cached, targets);
 				return {
 					status: "ok",
-					requirements: toRequirements(cached, options.thresholds),
+					requirements: mergeFocusedRequirements(
+						toRequirements(full, options.thresholds),
+						focused,
+						options.thresholds,
+					),
 					messagesUsed,
 					latencyMs: now() - started,
 					cache: "hit",
@@ -179,9 +234,14 @@ export const createSemanticDetector = (
 							),
 						);
 				}
+				const { full, focused } = splitProbabilities(probabilities, targets);
 				return {
 					status: "ok",
-					requirements: toRequirements(probabilities, options.thresholds),
+					requirements: mergeFocusedRequirements(
+						toRequirements(full, options.thresholds),
+						focused,
+						options.thresholds,
+					),
 					messagesUsed,
 					latencyMs: now() - started,
 					...(cacheKey !== undefined ? { cache: "miss" as const } : {}),
